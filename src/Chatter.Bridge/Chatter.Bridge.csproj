@@ -6,5 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\Shared\SharedChatRules.cs" Link="Shared\SharedChatRules.cs" />
+    <Compile Include="..\Shared\StableCompatibilityProfile.cs" Link="Shared\StableCompatibilityProfile.cs" />
   </ItemGroup>
 </Project>

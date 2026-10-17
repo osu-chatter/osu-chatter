@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\Shared\SharedChatRules.cs" Link="Shared\SharedChatRules.cs" />
+    <Compile Include="..\Shared\StableCompatibilityProfile.cs" Link="Shared\StableCompatibilityProfile.cs" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.Security" />
     <EmbeddedResource Include="..\..\translation\setup.ps1" LogicalName="Chatter.Translation.setup.ps1" />

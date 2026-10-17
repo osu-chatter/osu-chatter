@@ -32,6 +32,8 @@ The other launchers are `build.bat` to build, `check.bat` to run the offline che
 .\package.bat -NoPause -Version v1.0.0
 ```
 
+Game offsets, signatures, and reflected member names are maintained together in [`src/Shared/StableCompatibilityProfile.cs`](src/Shared/StableCompatibilityProfile.cs). See the [compatibility guide](docs/stable-compatibility.md) for more instructions.
+
 ## Translation
 
 On first launch, choose a provider and languages. You can change them later in **Settings → Translation preferences**.

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>Chatter.App</RootNamespace>
+    <AssemblyName>chatter</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Resources\chatter.ico</ApplicationIcon>
+    <Prefer32Bit>true</Prefer32Bit>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\chatter.ico" LogicalName="Chatter.App.Resources.chatter.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Chatter.Core\Chatter.Core.csproj" />
+    <ProjectReference Include="..\Chatter.Bridge\Chatter.Bridge.csproj" />
+  </ItemGroup>
+  <Target Name="EmbedProjectLibraries" BeforeTargets="AssignTargetPaths" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <EmbeddedResource Include="@(ReferenceCopyLocalPaths)" Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll'">
+        <LogicalName>Chatter.Bundle.%(Filename)%(Extension)</LogicalName>
+      </EmbeddedResource>
+    </ItemGroup>
+  </Target>
+</Project>

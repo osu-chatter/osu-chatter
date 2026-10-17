@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <PlatformTarget>x86</PlatformTarget>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+    <AppendTargetFrameworkToOutputPath>true</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+</Project>

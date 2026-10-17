@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <RootNamespace>Chatter.Bridge</RootNamespace>
+    <AssemblyName>Chatter.Bridge</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\SharedChatRules.cs" Link="Shared\SharedChatRules.cs" />
+  </ItemGroup>
+</Project>

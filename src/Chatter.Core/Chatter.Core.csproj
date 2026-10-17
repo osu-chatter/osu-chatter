@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <RootNamespace>Chatter</RootNamespace>
+    <AssemblyName>Chatter.Core</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\SharedChatRules.cs" Link="Shared\SharedChatRules.cs" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Security" />
+    <EmbeddedResource Include="..\..\translation\setup.ps1" LogicalName="Chatter.Translation.setup.ps1" />
+    <EmbeddedResource Include="..\..\translation\worker.py" LogicalName="Chatter.Translation.worker.py" />
+    <EmbeddedResource Include="..\..\translation\requirements.txt" LogicalName="Chatter.Translation.requirements.txt" />
+    <EmbeddedResource Include="..\..\translation\runtime.txt" LogicalName="Chatter.Translation.runtime.txt" />
+  </ItemGroup>
+</Project>

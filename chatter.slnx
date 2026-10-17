@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Chatter.App/Chatter.App.csproj" />
+    <Project Path="src/Chatter.Bridge/Chatter.Bridge.csproj" />
+    <Project Path="src/Chatter.Core/Chatter.Core.csproj" />
+  </Folder>
+</Solution>

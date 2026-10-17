@@ -1,0 +1,63 @@
+name: Build and release
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate pull request title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        shell: pwsh
+        run: |
+          $allowedTypes = 'feat|fix|docs|refactor|perf|test|build|ci|chore|style|revert'
+          if ($env:PR_TITLE -cnotmatch "^($allowedTypes)(\([a-z0-9][a-z0-9/-]*\))?!?: [a-z0-9].{0,70}$" -or $env:PR_TITLE.Length -gt 72) {
+            Write-Error 'PR title must be lowercase Conventional Commits, no longer than 72 characters, for example: fix(translator): retry failed setup'
+          }
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Build, check, and prepare release
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            & .\package.bat -NoPause -Version $env:GITHUB_REF_NAME
+          } else {
+            & .\check.bat -NoPause
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload release archive
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: osu-chatter-windows-x64
+          path: dist/osu-chatter-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: osu-chatter-windows-x64
+          path: dist
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME .\dist\osu-chatter-windows-x64.zip --generate-notes

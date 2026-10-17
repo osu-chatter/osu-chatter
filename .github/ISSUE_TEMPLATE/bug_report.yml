@@ -1,0 +1,47 @@
+name: Bug report
+description: Report a problem with osu-chatter.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include chat contents, private-message screenshots, API keys, or unredacted setup logs.
+  - type: input
+    id: version
+    attributes:
+      label: osu-chatter version
+      description: Include the release version or commit if known.
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+    validations:
+      required: true
+  - type: input
+    id: osu
+    attributes:
+      label: osu! stable version
+    validations:
+      required: false
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the actions that led to the problem. Remove personal or chat information.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Share relevant error text only after removing usernames, chat contents, API keys, and other private data.
+    validations:
+      required: false

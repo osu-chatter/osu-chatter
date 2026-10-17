@@ -1,0 +1,17 @@
+osu-chatter
+
+Extract the ZIP, then run chatter.exe. Keep chatter.exe.config in the same folder.
+On first launch, choose your translation provider and languages.
+
+Open osu!stable and sign in. Chatter reads the conversations you have open in-game.
+
+Requires 64-bit Windows 10 or 11 and .NET Framework 4.8.
+You don't need Visual Studio, the .NET SDK, or Python to run this download.
+
+Local translation downloads its runtime during setup and language models as
+needed. The first download can take a while and requires an internet connection.
+For DeepL or a custom server, enter your provider details in Settings.
+
+If osu! runs as administrator, run chatter as administrator too.
+
+See README.md for setup details and troubleshooting.

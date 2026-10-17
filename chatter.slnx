@@ -3,5 +3,6 @@
     <Project Path="src/Chatter.App/Chatter.App.csproj" />
     <Project Path="src/Chatter.Bridge/Chatter.Bridge.csproj" />
     <Project Path="src/Chatter.Core/Chatter.Core.csproj" />
+    <Project Path="src/Chatter.Tests/Chatter.Tests.csproj" />
   </Folder>
 </Solution>

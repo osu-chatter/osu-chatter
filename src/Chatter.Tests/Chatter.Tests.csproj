@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <RootNamespace>Chatter.Tests</RootNamespace>
+    <AssemblyName>Chatter.Tests</AssemblyName>
+    <Prefer32Bit>true</Prefer32Bit>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Web.Extensions" />
+    <ProjectReference Include="..\Chatter.Core\Chatter.Core.csproj" />
+    <ProjectReference Include="..\Chatter.Bridge\Chatter.Bridge.csproj" />
+    <ProjectReference Include="..\Chatter.App\Chatter.App.csproj" />
+  </ItemGroup>
+</Project>

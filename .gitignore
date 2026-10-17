@@ -1,0 +1,49 @@
+# .NET / MSBuild output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+[Aa]rtifacts/
+[Pp]ublish/
+[Oo]ut/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.slnx.docstates
+
+# Other IDEs
+.idea/
+.vscode/
+
+# Test and coverage output
+TestResults/
+*.trx
+coverage/
+coverage.*
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+temp/
+tmp/
+dist/
+
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
+
+# Python caches and local environments used by translation tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/

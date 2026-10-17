@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Chatter.Shared;
 
 namespace Chatter {
     public sealed class ProcessMemory : IProcessMemory, IDisposable {
@@ -22,7 +23,7 @@ namespace Chatter {
                 var entry = new NativeMethods.ProcessEntry { Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.ProcessEntry)) };
                 if (!NativeMethods.Process32FirstW(snap, ref entry)) return 0;
                 do {
-                    if (string.Equals(entry.ExeFile, "osu!.exe", StringComparison.OrdinalIgnoreCase)) return (int)entry.ProcessId;
+                    if (string.Equals(entry.ExeFile, StableCompatibilityProfile.ProcessName, StringComparison.OrdinalIgnoreCase)) return (int)entry.ProcessId;
                 } while (NativeMethods.Process32NextW(snap, ref entry));
                 return 0;
             } finally {
@@ -145,11 +146,7 @@ namespace Chatter {
                 int start = rel - first;
                 if (start < 0) { search = rel + 1; continue; }
                 if (start + pattern.Bytes.Length > buffer.Length) return -1;
-                bool matched = true;
-                for (int j = 0; j < pattern.Bytes.Length; j++) {
-                    if (pattern.Mask[j] == 1 && buffer[start + j] != pattern.Bytes[j]) { matched = false; break; }
-                }
-                if (matched) return start;
+                if (pattern.Matches(buffer, start)) return start;
                 search = rel + 1;
             }
             return -1;
@@ -177,5 +174,13 @@ namespace Chatter {
         public byte[] Bytes { get; }
         public byte[] Mask { get; }
         public int Offset { get; }
+
+        internal bool Matches(byte[] buffer, int start) {
+            if (buffer == null || start < 0 || start > buffer.Length - Bytes.Length) return false;
+            for (int i = 0; i < Bytes.Length; i++) {
+                if (Mask[i] == 1 && buffer[start + i] != Bytes[i]) return false;
+            }
+            return true;
+        }
     }
 }

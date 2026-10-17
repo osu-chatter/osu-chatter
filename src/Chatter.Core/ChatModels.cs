@@ -64,7 +64,8 @@ namespace Chatter {
     }
 
     public static class ChatRules {
-        public const int LoginConnected = 65793;
+        // Compatibility wrappers retained for callers; raw game values live in the profile.
+        public const int LoginConnected = StableCompatibilityProfile.Account.ConnectedLogin;
         public const string LocalTranslator = "local";
 
         public static readonly string[] Languages = {
@@ -75,11 +76,11 @@ namespace Chatter {
         };
 
         public static bool MenuOrLobby(int state) {
-            return SharedChatRules.MenuOrLobby(state);
+            return StableCompatibilityProfile.MenuOrLobby(state);
         }
 
         public static bool LoggedIn(int id, string name, int login) {
-            return id > 0 && login != 256 && !name.Trim().Equals("guest", StringComparison.OrdinalIgnoreCase);
+            return StableCompatibilityProfile.Account.LoggedIn(id, name, login);
         }
 
         public static string ChannelLanguage(string name) {

@@ -50,6 +50,10 @@ namespace Chatter.Tests {
             Run("empty private conversation", GraphTests.PrivateEmpty);
             Run("message identity", GraphTests.Identity);
             Run("chat root scan", GraphTests.RootPattern);
+            Run("chat signature boundaries", CompatibilityTests.RootSignatures);
+            Run("chat layout mutation safeguards", CompatibilityTests.GraphConsistency);
+            Run("fresh account layout reads", CompatibilityTests.AccountReads);
+            Run("reader and bridge share one profile", CompatibilityTests.SharedProfile);
         }
 
         static void RunTranslationChecks() {

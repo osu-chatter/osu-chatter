@@ -1,56 +1,53 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using Layout = Chatter.Shared.StableCompatibilityProfile.Chat;
 
 namespace Chatter {
     /// <summary>
-    /// Read-only view of the open osu!stable chat tabs.
-    /// One static holds the room list. The selected room is 20 bytes before it,
-    /// and the tab manager is 4 bytes after it. Room name is +4, message list is +16.
-    /// A message stores body +4, sender +8, and a local DateTime at +36.
-    /// CLR object headers mean those field offsets already include the method table.
+    /// Read-only view of open chat tabs using the shared Stable compatibility profile.
+    /// Game field offsets live in that profile; CLR offsets live in Clr32Layout.
     /// </summary>
     public static class ChatGraph {
+        static readonly Pattern RootPattern = new Pattern("chatRoot", Layout.RootSignature, Layout.RootOperandOffset);
+
         public static List<uint> Roots(byte[] code) {
             var found = new List<uint>();
-            if (code == null || code.Length < 27) return found;
-            for (int i = 0; i + 27 <= code.Length; i++) {
-                if (code[i] != 0x8B || code[i + 1] != 0x0D) continue;
-                if (code[i + 6] != 0x8D || code[i + 7] != 0x57 || code[i + 8] != 0x04 || code[i + 9] != 0xE8) continue;
-                if (code[i + 14] != 0xB8) continue;
-                if (code[i + 19] != 0x89 || code[i + 20] != 0x47 || code[i + 21] != 0x0C || code[i + 22] != 0x8B || code[i + 23] != 0xD7) continue;
-                uint address = BitConverter.ToUInt32(code, i + 2);
-                if (address >= 0x10000 && address < 0x7fff0000 && (address % 4) == 0) found.Add(address);
+            if (code == null) return found;
+            for (int i = 0; i <= code.Length - RootPattern.Bytes.Length; i++) {
+                if (!RootPattern.Matches(code, i)) continue;
+                uint address = BitConverter.ToUInt32(code, i + RootPattern.Offset);
+                if (address >= Clr32Layout.MinimumAddress && address < Clr32Layout.AddressLimit && (address % Clr32Layout.WordSize) == 0) found.Add(address);
             }
             return found;
         }
 
         public static ChatSnapshot Read(IProcessMemory memory, uint root, int session, string ownName) {
-            if (memory == null || root < 20) return null;
-            uint? allPtr = Word(memory, root);
+            if (memory == null || root < Layout.SelectedRoomBeforeRoot) return null;
+            uint? allPtr = Word(memory, root + Layout.AllRooms);
             var all = allPtr.HasValue ? ListRead(memory, allPtr.Value, 512) : null;
             if (all == null || all.Count == 0) return null;
             uint first = all.Items[0];
-            uint? roomType = Word(memory, first);
-            if (!roomType.HasValue || roomType.Value < 0x10000) return null;
-            uint? current = Word(memory, root - 20);
-            uint? manager = Word(memory, root + 4);
+            uint? roomType = Word(memory, first + Clr32Layout.MethodTable);
+            if (!roomType.HasValue || roomType.Value < Clr32Layout.MinimumAddress) return null;
+            uint? current = Word(memory, root - Layout.SelectedRoomBeforeRoot);
+            uint? manager = Word(memory, root + Layout.TabManager);
             if (!current.HasValue || !manager.HasValue) return null;
-            uint? tabsPtr = Word(memory, manager.Value + 0x1C);
+            uint? tabsPtr = Word(memory, manager.Value + Layout.ManagerTabs);
             var tabs = tabsPtr.HasValue ? ListRead(memory, tabsPtr.Value, 64) : null;
             if (tabs == null) return null;
 
             var channels = new List<ChatChannel>();
             for (int i = 0; i < tabs.Count; i++) {
                 uint tab = tabs.Items[i];
-                uint? room = Word(memory, tab + 12);
+                uint? room = Word(memory, tab + Layout.TabRoom);
                 if (!room.HasValue || room.Value == 0) continue;
-                uint? tag = Word(memory, room.Value);
+                uint? tag = Word(memory, room.Value + Clr32Layout.MethodTable);
                 if (!tag.HasValue || tag.Value != roomType.Value) continue;
-                uint? namePtr = Word(memory, room.Value + 4);
+                uint? namePtr = Word(memory, room.Value + Layout.RoomName);
                 string name = namePtr.HasValue ? String(memory, namePtr.Value) : null;
                 if (name == null || name.Length == 0 || name.Length > 160 || ChatRules.HasControl(name)) return null;
-                uint? listPtr = Word(memory, room.Value + 16);
+                uint? listPtr = Word(memory, room.Value + Layout.RoomMessages);
                 var list = listPtr.HasValue ? ListRead(memory, listPtr.Value, 10000) : null;
                 if (list == null) return null;
 
@@ -59,16 +56,16 @@ namespace Chatter {
                 int start = list.Count > 200 ? list.Count - 200 : 0;
                 for (int j = start; j < list.Count; j++) {
                     uint obj = list.Items[j];
-                    uint? textPtr = Word(memory, obj + 4);
-                    uint? senderPtr = Word(memory, obj + 8);
+                    uint? textPtr = Word(memory, obj + Layout.MessageBody);
+                    uint? senderPtr = Word(memory, obj + Layout.MessageSender);
                     if (!textPtr.HasValue || !senderPtr.HasValue) return null;
                     string text = String(memory, textPtr.Value);
                     string sender = String(memory, senderPtr.Value);
                     if (text == null || sender == null) return null;
                     bool system = text.Length == 0 || sender.Length == 0;
-                    byte[] tickBytes = memory.ReadBytes(obj + 36, 8);
+                    byte[] tickBytes = memory.ReadBytes(obj + Layout.MessageTime, Clr32Layout.DateTimeSize);
                     if (tickBytes == null) return null;
-                    ulong ticks = BitConverter.ToUInt64(tickBytes, 0) & 0x3fffffffffffffffUL;
+                    ulong ticks = BitConverter.ToUInt64(tickBytes, 0) & Clr32Layout.DateTimeTicksMask;
                     if (ticks < 600000000000000000UL || ticks > 3155378975999999999UL) return null;
                     ulong seconds = (ticks / 10000000UL) % 86400UL;
                     string time = string.Format("{0:00}:{1:00}:{2:00}", seconds / 3600UL, (seconds / 60UL) % 60UL, seconds % 60UL);
@@ -83,21 +80,21 @@ namespace Chatter {
                         text = sender;
                         sender = "";
                     }
-                    if (Word(memory, obj + 4) != textPtr || Word(memory, obj + 8) != senderPtr) return null;
+                    if (Word(memory, obj + Layout.MessageBody) != textPtr || Word(memory, obj + Layout.MessageSender) != senderPtr) return null;
                     ulong hash = Hash(ticks, name, sender, text);
                     int occurrence;
                     occurrences.TryGetValue(hash, out occurrence);
                     occurrences[hash] = occurrence + 1;
                     messages.Add(new ChatMessage(hash.ToString("x") + "-" + occurrence.ToString(), sender, text, time, outgoing, system));
                 }
-                if (!Unchanged(memory, list) || Word(memory, room.Value + 16) != listPtr) return null;
+                if (!Unchanged(memory, list) || Word(memory, room.Value + Layout.RoomMessages) != listPtr) return null;
                 channels.Add(new ChatChannel(name, name[0] != '#', room.Value == current.Value, messages));
             }
 
             if (channels.Count == 0 || !AnySelected(channels)) return null;
             if (!Unchanged(memory, tabs) || !Unchanged(memory, all)) return null;
-            if (Word(memory, root) != allPtr || Word(memory, root + 4) != manager) return null;
-            if (Word(memory, manager.Value + 0x1C) != tabsPtr || Word(memory, root - 20) != current) return null;
+            if (Word(memory, root + Layout.AllRooms) != allPtr || Word(memory, root + Layout.TabManager) != manager) return null;
+            if (Word(memory, manager.Value + Layout.ManagerTabs) != tabsPtr || Word(memory, root - Layout.SelectedRoomBeforeRoot) != current) return null;
             return new ChatSnapshot(session, null, ownName ?? "", channels);
         }
 
@@ -115,43 +112,43 @@ namespace Chatter {
         }
 
         static ClrList ListRead(IProcessMemory memory, uint address, int max) {
-            if (address < 0x10000) return null;
-            uint? array = Word(memory, address + 4);
-            uint? countWord = Word(memory, address + 12);
+            if (address < Clr32Layout.MinimumAddress) return null;
+            uint? array = Word(memory, address + Clr32Layout.ListArray);
+            uint? countWord = Word(memory, address + Clr32Layout.ListCount);
             if (!array.HasValue || !countWord.HasValue) return null;
-            uint? capacity = Word(memory, array.Value + 4);
+            uint? capacity = Word(memory, array.Value + Clr32Layout.ArrayLength);
             if (!capacity.HasValue) return null;
             if (countWord.Value > (uint)max || countWord.Value > capacity.Value || capacity.Value > 65536) return null;
-            uint? version = Word(memory, address + 16);
+            uint? version = Word(memory, address + Clr32Layout.ListVersion);
             if (!version.HasValue) return null;
             int count = (int)countWord.Value;
             var items = new uint[count];
             if (count > 0) {
-                byte[] raw = memory.ReadBytes(array.Value + 8, count * 4);
+                byte[] raw = memory.ReadBytes(array.Value + Clr32Layout.ArrayData, count * Clr32Layout.WordSize);
                 if (raw == null) return null;
-                for (int i = 0; i < count; i++) items[i] = BitConverter.ToUInt32(raw, i * 4);
+                for (int i = 0; i < count; i++) items[i] = BitConverter.ToUInt32(raw, i * Clr32Layout.WordSize);
             }
             return new ClrList { Address = address, Array = array.Value, Version = version.Value, Count = count, Items = items };
         }
 
         static bool Unchanged(IProcessMemory memory, ClrList list) {
-            return Word(memory, list.Address + 4) == list.Array
-                && Word(memory, list.Address + 12) == (uint)list.Count
-                && Word(memory, list.Address + 16) == list.Version;
+            return Word(memory, list.Address + Clr32Layout.ListArray) == list.Array
+                && Word(memory, list.Address + Clr32Layout.ListCount) == (uint)list.Count
+                && Word(memory, list.Address + Clr32Layout.ListVersion) == list.Version;
         }
 
         public static uint? Word(IProcessMemory memory, uint address) {
-            byte[] raw = memory.ReadBytes(address, 4);
-            if (raw == null || raw.Length != 4) return null;
+            byte[] raw = memory.ReadBytes(address, Clr32Layout.WordSize);
+            if (raw == null || raw.Length != Clr32Layout.WordSize) return null;
             return BitConverter.ToUInt32(raw, 0);
         }
 
         public static string String(IProcessMemory memory, uint address) {
-            if (address < 0x10000) return null;
-            uint? length = Word(memory, address + 4);
+            if (address < Clr32Layout.MinimumAddress) return null;
+            uint? length = Word(memory, address + Clr32Layout.StringLength);
             if (!length.HasValue || length.Value > 4096) return null;
             if (length.Value == 0) return "";
-            byte[] raw = memory.ReadBytes(address + 8, (int)length.Value * 2);
+            byte[] raw = memory.ReadBytes(address + Clr32Layout.StringData, (int)length.Value * Clr32Layout.CharacterSize);
             if (raw == null) return null;
             return DecodeUtf16(raw);
         }

@@ -12,6 +12,8 @@ using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using Chatter.Shared;
+using Stable = Chatter.Shared.StableCompatibilityProfile;
+using Members = Chatter.Shared.StableCompatibilityProfile.Members;
 
 [assembly: InternalsVisibleTo("Chatter.Tests")]
 
@@ -32,26 +34,26 @@ namespace Chatter.Bridge {
 
         public StableGame() {
             Assembly assembly = Assembly.GetEntryAssembly();
-            if (assembly == null || !string.Equals(Path.GetFileName(assembly.Location), "osu!.exe", StringComparison.OrdinalIgnoreCase))
+            if (assembly == null || !string.Equals(Path.GetFileName(assembly.Location), Stable.ProcessName, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Unsupported game");
-            Type chat = assembly.GetType("#=zOq1FT9SecrTxVa8ldCQtKMNEVVtMYwauiA==", true);
-            Type game = assembly.GetType("#=zLQ1lSsp1Sl649eje$Q==", true);
-            Type bancho = assembly.GetType("#=zZTtDI9i$TQmcWwn1v_pQEsI=", true);
-            send = chat.GetMethod("#=zpQuniAY=", Static, null, new[] { typeof(string), typeof(string), typeof(bool) }, null);
+            Type chat = assembly.GetType(Members.ChatType, true);
+            Type game = assembly.GetType(Members.GameType, true);
+            Type bancho = assembly.GetType(Members.BanchoType, true);
+            send = chat.GetMethod(Members.Send, Static, null, new[] { typeof(string), typeof(string), typeof(bool) }, null);
             if (send == null || send.ReturnType != typeof(void) || send.GetMethodBody() == null)
                 throw new InvalidOperationException("Unsupported sender");
-            user = Required(game, "#=zpJrV5O4=", Static);
-            userId = Required(user.FieldType, "#=z5_k5yXY=", Instance);
-            mode = Required(game, "#=zFX09SEA=", Static);
-            connected = Required(bancho, "#=z_n7Ve0k=", Static);
-            ready = Required(bancho, "#=z0C$NjaaaFPfo", Static);
-            rooms = Required(chat, "#=zvdjfD6H60jaVvrMMyw==", Static);
-            Type room = assembly.GetType("#=z9M3mPCP4CJ8T84$nrvqz2TqUKq64", true);
-            roomName = Required(room, "#=z7OdQVus=", Instance);
-            scheduler = Required(game, "#=zlLqslSk=", Static).GetValue(null);
+            user = Required(game, Members.User, Static);
+            userId = Required(user.FieldType, Members.UserId, Instance);
+            mode = Required(game, Members.Mode, Static);
+            connected = Required(bancho, Members.Connected, Static);
+            ready = Required(bancho, Members.Ready, Static);
+            rooms = Required(chat, Members.Rooms, Static);
+            Type room = assembly.GetType(Members.RoomType, true);
+            roomName = Required(room, Members.RoomName, Instance);
+            scheduler = Required(game, Members.Scheduler, Static).GetValue(null);
             if (scheduler == null) throw new InvalidOperationException("Game not ready");
             schedule = scheduler.GetType().GetMethods(Instance).Single(method =>
-                method.Name == "#=zuqLmyLg=" && method.GetParameters().Length == 2 && method.GetParameters()[1].ParameterType == typeof(bool));
+                method.Name == Members.Schedule && method.GetParameters().Length == 2 && method.GetParameters()[1].ParameterType == typeof(bool));
             callback = schedule.GetParameters()[0].ParameterType;
             MethodInfo invoke = callback.GetMethod("Invoke");
             if (!typeof(Delegate).IsAssignableFrom(callback) || invoke.ReturnType != typeof(void) || invoke.GetParameters().Length != 0 || userId.FieldType != typeof(int))
@@ -71,7 +73,7 @@ namespace Chatter.Bridge {
                 || !(bool)connected.GetValue(null) || !(bool)ready.GetValue(null))
                 throw new InvalidOperationException("Account changed or disconnected");
             int state = Convert.ToInt32(mode.GetValue(null));
-            if (!SharedChatRules.MenuOrLobby(state))
+            if (!Stable.MenuOrLobby(state))
                 throw new InvalidOperationException("Sending is available outside gameplay");
             IList list = rooms.GetValue(null) as IList;
             if (list == null || list.Count > 512 || !list.Cast<object>().Any(room => (string)roomName.GetValue(room) == target))
@@ -80,11 +82,11 @@ namespace Chatter.Bridge {
 
         public void Schedule(Action action) {
             Delegate call = Delegate.CreateDelegate(callback, action.Target, action.Method);
-            schedule.Invoke(scheduler, new object[] { call, true });
+            schedule.Invoke(scheduler, new object[] { call, Members.ScheduleFlag });
         }
 
         public void Send(string text, string target) {
-            send.Invoke(null, new object[] { text, target, false });
+            send.Invoke(null, new object[] { text, target, Members.SendFlag });
         }
 
     }

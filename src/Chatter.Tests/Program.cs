@@ -43,6 +43,7 @@ namespace Chatter.Tests {
             Run("conversation refresh keeps selection", UiTests.Refresh);
             Run("rounded controls match their parent", UiTests.RoundedControls);
             Run("profile pictures and chat links", UiTests.Profiles);
+            Run("listening underlines track the title", UiTests.LinkLines);
         }
 
         static void RunChatReadChecks() {

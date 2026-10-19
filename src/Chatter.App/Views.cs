@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Chatter;
 
@@ -198,6 +199,7 @@ namespace Chatter.App {
             int maxText = Math.Max(120, Math.Min(520, (int)((Width - 64) * 0.72))) - 28;
             int y = 18;
             ChatMessage previous = null;
+            using (LineMeasure measure = LineMeasure.Open(this))
             for (int i = 0; i < messages.Count; i++) {
                 ChatMessage message = messages[i];
                 var block = new Block { Message = message };
@@ -248,7 +250,7 @@ namespace Chatter.App {
                 block.Bubble = new Rectangle(x, y, bubbleWidth, bubbleHeight);
                 block.ShowAvatar = !grouped;
                 block.Avatar = new Rectangle(message.Outgoing ? x + bubbleWidth + AvatarGap : Side, block.ShowSender ? -20 : 0, AvatarSize, AvatarSize);
-                block.Links = LayoutLinks(message.Text, ChatLinks.Find(message.Text, message.Source), textWidth);
+                block.Links = LayoutLinks(measure, message.Text, ChatLinks.Find(message.Text, message.Source), textWidth);
                 block.HasTranslate = link;
                 block.LinkCaption = linkCaption;
                 if (link) block.Translate = new Rectangle(x + 14, y + bubbleHeight - 22, linkWidth, 18);
@@ -584,94 +586,141 @@ namespace Chatter.App {
             return char.ToUpperInvariant(name[i]).ToString();
         }
 
-        static List<TextLink> LayoutLinks(string text, List<ChatLinks.Span> spans, int width) {
+        // MeasureText on .NET Framework adds glyph padding that DrawText does not draw.
+        // GDI advances of the same line match the glyphs in the bubble, so the underline sits on the link.
+        static List<TextLink> LayoutLinks(LineMeasure measure, string text, List<ChatLinks.Span> spans, int width) {
             var links = new List<TextLink>();
-            if (spans == null || spans.Count == 0 || string.IsNullOrEmpty(text) || width <= 0) return links;
-            int lineHeight = TextRenderer.MeasureText("Ay", UiFont.Message, new Size(Math.Max(1, width), int.MaxValue), PaintKit.Single).Height;
+            if (measure == null || spans == null || spans.Count == 0 || string.IsNullOrEmpty(text) || width <= 0) return links;
+            int lineHeight = measure.LineHeight;
             if (lineHeight < 1) lineHeight = UiFont.Message.Height;
             int limit = PaintKit.Measure(text, UiFont.Message, width).Height;
             if (limit < lineHeight) limit = lineHeight;
-            int x = 0;
             int y = 0;
             int index = 0;
             while (index < text.Length && y < limit) {
-                char c = text[index];
-                if (c == '\n') { x = 0; y += lineHeight; index++; continue; }
-                if (c == '\r') { index++; continue; }
-                int end = index + 1;
-                if (char.IsWhiteSpace(c)) {
-                    while (end < text.Length && char.IsWhiteSpace(text[end]) && text[end] != '\n' && text[end] != '\r') end++;
-                } else {
-                    while (end < text.Length && !char.IsWhiteSpace(text[end]) && text[end] != '\n' && text[end] != '\r') end++;
-                }
-                PlaceLink(text, spans, links, index, end, width, lineHeight, limit, ref x, ref y);
+                if (text[index] == '\r') { index++; continue; }
+                if (text[index] == '\n') { y += lineHeight; index++; continue; }
+                int end = TakeLine(measure, text, index, width);
+                PlaceLine(measure, text, spans, links, index, end, y, lineHeight);
+                y += lineHeight;
+                if (end < text.Length && text[end] == ' ') end++;
                 index = end;
-            }
-            if (links.Count == 0) {
-                for (int i = 0; i < spans.Count; i++) {
-                    if (spans[i].Index > 0 || spans[i].Length < text.Length) continue;
-                    Size size = PaintKit.Measure(text, UiFont.Message, width);
-                    links.Add(new TextLink { Bounds = new Rectangle(0, 0, Math.Max(1, size.Width), Math.Max(1, size.Height)), Url = spans[i].Url });
-                    break;
-                }
             }
             return links;
         }
 
-        static void PlaceLink(string text, List<ChatLinks.Span> spans, List<TextLink> links, int start, int end, int width, int lineHeight, int limit, ref int x, ref int y) {
-            if (start >= end || y >= limit) return;
-            int tokenWidth = TextWidth(text.Substring(start, end - start));
-            if (x > 0 && x + tokenWidth > width) {
-                x = 0;
-                y += lineHeight;
-                if (y >= limit) return;
-            }
-            if (tokenWidth <= width || end == start + 1) {
-                EmitLink(text, spans, links, start, end, x, y, lineHeight, width);
-                x += tokenWidth;
-                return;
-            }
-            int chunk = start;
-            while (chunk < end && y < limit) {
-                int fit = 1;
-                int fitWidth = TextWidth(text.Substring(chunk, 1));
-                while (chunk + fit < end) {
-                    int wider = TextWidth(text.Substring(chunk, fit + 1));
-                    if (wider > width) break;
-                    fit++;
-                    fitWidth = wider;
+        static int TakeLine(LineMeasure measure, string text, int start, int width) {
+            int index = start;
+            int last = start;
+            while (index < text.Length && text[index] != '\n' && text[index] != '\r') {
+                int next = index + 1;
+                if (char.IsWhiteSpace(text[index])) {
+                    while (next < text.Length && char.IsWhiteSpace(text[next]) && text[next] != '\n' && text[next] != '\r') next++;
+                } else {
+                    while (next < text.Length && !char.IsWhiteSpace(text[next]) && text[next] != '\n' && text[next] != '\r') next++;
                 }
-                if (x > 0 && x + fitWidth > width) {
-                    x = 0;
-                    y += lineHeight;
-                    if (y >= limit) return;
+                if (measure.Advance(text.Substring(start, next - start)) <= width) {
+                    last = next;
+                    index = next;
+                    continue;
                 }
-                EmitLink(text, spans, links, chunk, chunk + fit, x, y, lineHeight, width);
-                x += fitWidth;
-                chunk += fit;
-                if (chunk < end) { x = 0; y += lineHeight; }
+                if (last > start) return last;
+                int fit = index + 1;
+                while (fit < next && measure.Advance(text.Substring(start, fit - start + 1)) <= width) fit++;
+                if (fit < text.Length && char.IsLowSurrogate(text[fit]) && fit > start + 1) fit--;
+                return fit;
             }
+            return index;
         }
 
-        static void EmitLink(string text, List<ChatLinks.Span> spans, List<TextLink> links, int start, int end, int x, int y, int lineHeight, int width) {
+        static void PlaceLine(LineMeasure measure, string text, List<ChatLinks.Span> spans, List<TextLink> links, int start, int end, int y, int lineHeight) {
+            if (end <= start) return;
             for (int i = 0; i < spans.Count; i++) {
                 ChatLinks.Span span = spans[i];
                 int from = Math.Max(start, span.Index);
                 int to = Math.Min(end, span.Index + span.Length);
                 if (from >= to) continue;
-                int prefix = from == start ? 0 : TextWidth(text.Substring(start, from - start));
-                int piece = TextWidth(text.Substring(from, to - from));
-                if (piece < 1) piece = 1;
-                int left = x + prefix;
-                if (left >= width) continue;
-                if (left + piece > width) piece = width - left;
-                links.Add(new TextLink { Bounds = new Rectangle(left, y, piece, lineHeight), Url = span.Url });
+                int left = from == start ? 0 : measure.Advance(text.Substring(start, from - start));
+                int right = measure.Advance(text.Substring(start, to - start));
+                if (right <= left) right = left + 1;
+                links.Add(new TextLink { Bounds = new Rectangle(left, y, right - left, lineHeight), Url = span.Url });
             }
         }
 
-        static int TextWidth(string value) {
-            if (string.IsNullOrEmpty(value)) return 0;
-            return TextRenderer.MeasureText(value, UiFont.Message, new Size(10000, 100), PaintKit.Single).Width;
+        sealed class LineMeasure : IDisposable {
+            readonly Graphics graphics;
+            readonly IntPtr dc;
+            readonly IntPtr font;
+            readonly IntPtr previous;
+            public readonly int LineHeight;
+
+            LineMeasure(Graphics graphics, IntPtr dc, IntPtr font, IntPtr previous, int lineHeight) {
+                this.graphics = graphics;
+                this.dc = dc;
+                this.font = font;
+                this.previous = previous;
+                LineHeight = lineHeight;
+            }
+
+            public static LineMeasure Open(Control control) {
+                Graphics graphics = control.CreateGraphics();
+                IntPtr dc = graphics.GetHdc();
+                IntPtr font = UiFont.Message.ToHfont();
+                IntPtr previous = SelectObject(dc, font);
+                TextMetric metric;
+                int height = GetTextMetrics(dc, out metric) && metric.Height > 0 ? metric.Height : UiFont.Message.Height;
+                return new LineMeasure(graphics, dc, font, previous, height);
+            }
+
+            public int Advance(string text) {
+                if (string.IsNullOrEmpty(text)) return 0;
+                Size size;
+                if (!GetTextExtentPoint32(dc, text, text.Length, out size)) return 0;
+                return Math.Max(0, size.Width);
+            }
+
+            public void Dispose() {
+                SelectObject(dc, previous);
+                DeleteObject(font);
+                graphics.ReleaseHdc(dc);
+                graphics.Dispose();
+            }
         }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct TextMetric {
+            public int Height;
+            public int Ascent;
+            public int Descent;
+            public int InternalLeading;
+            public int ExternalLeading;
+            public int AveCharWidth;
+            public int MaxCharWidth;
+            public int Weight;
+            public int Overhang;
+            public int DigitizedAspectX;
+            public int DigitizedAspectY;
+            public char FirstChar;
+            public char LastChar;
+            public char DefaultChar;
+            public char BreakChar;
+            public byte Italic;
+            public byte Underlined;
+            public byte StruckOut;
+            public byte PitchAndFamily;
+            public byte CharsetByte;
+        }
+
+        [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+        static extern bool GetTextExtentPoint32(IntPtr dc, string text, int length, out Size size);
+
+        [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+        static extern bool GetTextMetrics(IntPtr dc, out TextMetric metric);
+
+        [DllImport("gdi32.dll")]
+        static extern IntPtr SelectObject(IntPtr dc, IntPtr obj);
+
+        [DllImport("gdi32.dll")]
+        static extern bool DeleteObject(IntPtr obj);
     }
 }

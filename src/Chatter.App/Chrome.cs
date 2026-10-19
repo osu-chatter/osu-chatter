@@ -61,6 +61,11 @@ namespace Chatter.App {
             return path;
         }
 
+        // A rounded fill leaves the control's square corners. Those pixels keep BackColor unless cleared to the parent.
+        public static void ClearBehind(Graphics graphics, Control control) {
+            graphics.Clear(control.Parent == null ? control.BackColor : control.Parent.BackColor);
+        }
+
         public static void FillRound(Graphics graphics, Rectangle bounds, int radius, Color color) {
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (var path = Round(bounds, radius))
@@ -100,6 +105,7 @@ namespace Chatter.App {
         }
 
         protected override void OnPaint(PaintEventArgs e) {
+            PaintKit.ClearBehind(e.Graphics, this);
             var rect = new Rectangle(0, 0, Width - 1, Height - 1);
             Color fill = !Enabled ? Palette.Field : Filled ? (hover ? Palette.AccentHot : Palette.Accent) : (hover ? Color.FromArgb(36, 40, 50) : Palette.Field);
             Color text = !Enabled ? Palette.Faint : Filled ? Color.White : Palette.Ink;
@@ -131,6 +137,7 @@ namespace Chatter.App {
         }
 
         protected override void OnPaint(PaintEventArgs e) {
+            PaintKit.ClearBehind(e.Graphics, this);
             var rect = new Rectangle(0, 2, 38, 18);
             PaintKit.FillRound(e.Graphics, rect, 9, on ? Palette.Accent : (hover ? Color.FromArgb(55, 60, 72) : Palette.Field));
             int knob = on ? 20 : 2;
@@ -179,6 +186,7 @@ namespace Chatter.App {
         }
 
         protected override void OnPaint(PaintEventArgs e) {
+            PaintKit.ClearBehind(e.Graphics, this);
             var rect = new Rectangle(0, 0, Width - 1, Height - 1);
             PaintKit.FillRound(e.Graphics, rect, 10, Palette.Field);
             PaintKit.StrokeRound(e.Graphics, rect, 10, Palette.Line);
@@ -238,6 +246,7 @@ namespace Chatter.App {
         }
 
         protected override void OnPaint(PaintEventArgs e) {
+            PaintKit.ClearBehind(e.Graphics, this);
             var card = new Rectangle(16, 6, Width - 32, Height - 10);
             PaintKit.FillRound(e.Graphics, card, 8, Danger ? Palette.Banner : Palette.Info);
             int textWidth = card.Width - (string.IsNullOrEmpty(ActionCaption) ? 24 : 110);

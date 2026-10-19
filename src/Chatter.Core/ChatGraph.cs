@@ -69,11 +69,7 @@ namespace Chatter {
                     if (ticks < 600000000000000000UL || ticks > 3155378975999999999UL) return null;
                     ulong seconds = (ticks / 10000000UL) % 86400UL;
                     string time = string.Format("{0:00}:{1:00}:{2:00}", seconds / 3600UL, (seconds / 60UL) % 60UL, seconds % 60UL);
-                    if (!system) {
-                        string stamp = time.Substring(0, 5) + " ";
-                        if (sender.StartsWith(stamp, StringComparison.Ordinal) && sender.EndsWith(":", StringComparison.Ordinal))
-                            sender = sender.Substring(stamp.Length, sender.Length - stamp.Length - 1);
-                    }
+                    if (!system) sender = DisplaySender(sender, time);
                     bool outgoing = !system && !string.IsNullOrEmpty(ownName)
                         && ChatRules.NormalizeName(sender).Equals(ChatRules.NormalizeName(ownName), StringComparison.OrdinalIgnoreCase);
                     if (text.Length == 0) {
@@ -81,11 +77,13 @@ namespace Chatter {
                         sender = "";
                     }
                     if (Word(memory, obj + Layout.MessageBody) != textPtr || Word(memory, obj + Layout.MessageSender) != senderPtr) return null;
+                    string? source = null;
+                    if (!system && !TryMarkup(memory, obj, text, out source)) return null;
                     ulong hash = Hash(ticks, name, sender, text);
                     int occurrence;
                     occurrences.TryGetValue(hash, out occurrence);
                     occurrences[hash] = occurrence + 1;
-                    messages.Add(new ChatMessage(hash.ToString("x") + "-" + occurrence.ToString(), sender, text, time, outgoing, system));
+                    messages.Add(new ChatMessage(hash.ToString("x") + "-" + occurrence.ToString(), sender, text, time, outgoing, system, source));
                 }
                 if (!Unchanged(memory, list) || Word(memory, room.Value + Layout.RoomMessages) != listPtr) return null;
                 channels.Add(new ChatChannel(name, name[0] != '#', room.Value == current.Value, messages));
@@ -96,6 +94,30 @@ namespace Chatter {
             if (Word(memory, root + Layout.AllRooms) != allPtr || Word(memory, root + Layout.TabManager) != manager) return null;
             if (Word(memory, manager.Value + Layout.ManagerTabs) != tabsPtr || Word(memory, root - Layout.SelectedRoomBeforeRoot) != current) return null;
             return new ChatSnapshot(session, null, ownName ?? "", channels);
+        }
+
+        static string DisplaySender(string sender, string time) {
+            string stamp = time.Substring(0, 5) + " ";
+            if (!sender.StartsWith(stamp, StringComparison.Ordinal)) return sender;
+            sender = sender.Substring(stamp.Length);
+            if (sender.EndsWith(":", StringComparison.Ordinal)) sender = sender.Substring(0, sender.Length - 1);
+            if (sender.StartsWith("*", StringComparison.Ordinal)) sender = sender.Substring(1);
+            return sender.Trim();
+        }
+
+        static bool TryMarkup(IProcessMemory memory, uint obj, string text, out string? source) {
+            source = null;
+            uint? markupPtr = Word(memory, obj + Layout.MessageMarkup);
+            if (!markupPtr.HasValue) return false;
+            if (markupPtr.Value < Clr32Layout.MinimumAddress) return true;
+            uint? rawPtr = Word(memory, markupPtr.Value + Layout.MarkupText);
+            string? raw = rawPtr.HasValue ? String(memory, rawPtr.Value) : null;
+            if (!rawPtr.HasValue
+                || Word(memory, obj + Layout.MessageMarkup) != markupPtr
+                || Word(memory, markupPtr.Value + Layout.MarkupText) != rawPtr)
+                return false;
+            if (raw != null && ChatLinks.Visible(raw) == text) source = raw;
+            return true;
         }
 
         static bool AnySelected(List<ChatChannel> channels) {

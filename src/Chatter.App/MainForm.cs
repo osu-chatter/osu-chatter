@@ -21,6 +21,7 @@ namespace Chatter.App {
         readonly ConversationHeader header = new ConversationHeader();
         readonly BannerBar banner = new BannerBar();
         readonly TranscriptView transcript = new TranscriptView();
+        readonly PlayerDirectory profiles;
         readonly LineField draft = new LineField();
         readonly PillButton send = new PillButton { Filled = true, Caption = "Send" };
         readonly PillButton previewButton = new PillButton { Caption = "Preview" };
@@ -63,6 +64,9 @@ namespace Chatter.App {
 
         public MainForm(AppPreferences preferences) {
             this.preferences = preferences.Copy();
+            profiles = new PlayerDirectory(this);
+            profiles.Changed += delegate { if (!IsDisposed) transcript.Invalidate(); };
+            transcript.Players = profiles.Face;
             Text = "osu-chatter";
             Icon = AppIcon.Create();
             Font = UiFont.Body;
@@ -114,6 +118,7 @@ namespace Chatter.App {
             pollGeneration++;
             translationGeneration++;
             service.Dispose();
+            profiles.Dispose();
             base.OnFormClosed(e);
         }
 
@@ -431,7 +436,21 @@ namespace Chatter.App {
                 transcript.ManualTranslations = manualTranslations;
                 transcript.SetMessages(current.Messages, translations, translationErrors, stick);
             }
+            WatchProfiles();
             RefreshActions();
+        }
+
+        void WatchProfiles() {
+            if (DemoMode || snapshot == null) return;
+            var names = new List<string>();
+            if (snapshot.Account.Length > 0) names.Add(snapshot.Account);
+            for (int i = 0; i < snapshot.Channels.Count; i++) {
+                var messages = snapshot.Channels[i].Messages;
+                for (int j = 0; j < messages.Count; j++) {
+                    if (!messages[j].System && messages[j].Sender.Length > 0) names.Add(messages[j].Sender);
+                }
+            }
+            profiles.Watch(names, snapshot.Account, snapshot.AccountId);
         }
 
         void EmptyCopy(out string title, out string body) {
@@ -841,11 +860,14 @@ namespace Chatter.App {
         public void LoadDemo() {
             DemoMode = true;
             pollGeneration++;
+            profiles.Remember("friend", 0, true, null);
+            string playing = "is playing xi - Blue Zenith [FOUR DIMENSIONS]";
             var osu = new List<ChatMessage> {
                 new ChatMessage("s", "", "you joined #osu.", "19:40:58", false, true),
                 new ChatMessage("a", "you", "is anyone around for a lobby?", "19:41:18", true, false),
                 new ChatMessage("b", "friend", "привет, через минуту", "19:41:26", false, false),
                 new ChatMessage("c", "friend", "я на русском канале если что — можем сыграть пару карт", "19:41:40", false, false),
+                new ChatMessage("p", "friend", playing, "19:41:48", false, false, "[https://osu.ppy.sh/b/658127 " + playing + "]"),
                 new ChatMessage("d", "you", "sure, i'll be there", "19:42:01", true, false)
             };
             translations["b"] = "hi, in a minute";

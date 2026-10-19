@@ -24,6 +24,8 @@ namespace Chatter.Shared {
             internal const uint RoomMessages = 16;
             internal const uint MessageBody = 4;
             internal const uint MessageSender = 8;
+            internal const uint MessageMarkup = 16;
+            internal const uint MarkupText = 12;
             internal const uint MessageTime = 36;
         }
 

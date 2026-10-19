@@ -33,7 +33,7 @@ namespace Chatter {
                     throw new InvalidOperationException("Chat changed while reading; retrying");
                 }
                 failures = 0;
-                return new ChatSnapshot(snap.Session, account.Connected, account.Name, snap.Channels);
+                return new ChatSnapshot(snap.Session, account.Connected, account.Name, snap.Channels, account.Id);
             }
         }
 

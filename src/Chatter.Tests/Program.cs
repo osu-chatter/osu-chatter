@@ -66,6 +66,7 @@ namespace Chatter.Tests {
             Run("DeepL settings", PreferenceTests.DeepLProtocol);
             Run("saved preferences", PreferenceTests.Persistence);
             Run("first-run setup", PreferenceTests.Setup);
+            Run("conversation settings", PreferenceTests.Channels);
         }
 
         static void RunMessageChecks() {

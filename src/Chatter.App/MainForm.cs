@@ -13,10 +13,9 @@ namespace Chatter.App {
         readonly PillButton preferencesButton = new PillButton { Caption = "Translation preferences…" };
         readonly Label providerSummary = new Label { ForeColor = Palette.Muted, Font = UiFont.Body, BackColor = Palette.Sidebar };
         readonly Dictionary<string, string> drafts = new Dictionary<string, string>();
-        readonly Dictionary<string, string> outgoingLanguages = new Dictionary<string, string>();
         readonly Dictionary<string, string> translations = new Dictionary<string, string>();
         readonly Dictionary<string, string> translationErrors = new Dictionary<string, string>();
-        readonly Dictionary<string, bool> autoChoices = new Dictionary<string, bool>();
+        readonly HashSet<string> manualTranslations = new HashSet<string>();
         readonly HashSet<string> attempted = new HashSet<string>();
         readonly ChannelRail rail = new ChannelRail();
         readonly ConversationHeader header = new ConversationHeader();
@@ -76,7 +75,7 @@ namespace Chatter.App {
             KeyPreview = true;
             Build();
             service.TranslationStatus += status => Post(() => {
-                if (preferences.Endpoint != ChatRules.LocalTranslator) return;
+                if (!preferences.UsesLocalTranslator) return;
                 translatorStatus = status;
                 Render();
             });
@@ -101,7 +100,7 @@ namespace Chatter.App {
                 reading = preferences.StartReading;
                 pause.Caption = reading ? "Pause" : "Resume";
                 if (reading) StartPoll();
-                if (preferences.Endpoint == ChatRules.LocalTranslator) PrepareTranslator();
+                if (preferences.UsesLocalTranslator) PrepareTranslator();
             }
             LayoutChrome();
         }
@@ -140,10 +139,11 @@ namespace Chatter.App {
             banner.ActionClick += delegate {
                 attempted.Clear();
                 translationErrors.Clear();
-                if (preferences.Endpoint == ChatRules.LocalTranslator) PrepareTranslator();
+                foreach (string id in manualTranslations) attempted.Add(id);
+                if (preferences.UsesLocalTranslator) PrepareTranslator();
                 else ProbeTranslator();
             };
-            transcript.TranslateRequested += TranslateOne;
+            transcript.TranslateRequested += delegate(ChatMessage message) { TranslateOne(message, true); };
             Controls.Add(header);
             Controls.Add(banner);
             Controls.Add(transcript);
@@ -180,7 +180,7 @@ namespace Chatter.App {
             incomingButton.Click += delegate { PickLanguage(incomingButton, true); };
             auto.Toggled += delegate {
                 if (suppress || selected.Length == 0) return;
-                autoChoices[ChoiceKey()] = auto.On;
+                StoreFor(selected, entry => entry.AutoTranslate = auto.On);
                 if (auto.On) {
                     attempted.ExceptWith(translationErrors.Keys);
                     translationErrors.Clear();
@@ -256,7 +256,7 @@ namespace Chatter.App {
             using (var pen = new Pen(Palette.Line))
                 g.DrawLine(pen, 0, 0, 0, settings.Height);
             TextRenderer.DrawText(g, "Settings", UiFont.Title, new Rectangle(20, 18, 180, 30), Palette.Ink, PaintKit.Single);
-            TextRenderer.DrawText(g, "Translate incoming messages to", UiFont.Small, new Rectangle(20, 240, settings.Width - 40, 18), Palette.Muted, PaintKit.Single);
+            TextRenderer.DrawText(g, "Translate this conversation to", UiFont.Small, new Rectangle(20, 240, settings.Width - 40, 18), Palette.Muted, PaintKit.Single);
             TextRenderer.DrawText(g, "Auto-translate this conversation", UiFont.Body, new Rectangle(68, 320, settings.Width - 88, 24), Palette.Ink, PaintKit.Single);
             TextRenderer.DrawText(g, "Preview never sends. Send runs once, and only from a menu or lobby.", UiFont.Small, new Rectangle(20, 360, settings.Width - 40, 48), Palette.Faint, PaintKit.Wrap);
         }
@@ -296,6 +296,7 @@ namespace Chatter.App {
                 drafts.Clear();
                 translations.Clear();
                 translationErrors.Clear();
+                manualTranslations.Clear();
                 attempted.Clear();
                 unread = new Dictionary<string, int>();
                 translatorOffline = false;
@@ -320,7 +321,7 @@ namespace Chatter.App {
                 selected = "";
                 for (int i = 0; i < next.Channels.Count; i++) if (next.Channels[i].Selected) selected = next.Channels[i].Name;
                 if (selected.Length == 0 && next.Channels.Count > 0) selected = next.Channels[0].Name;
-                LoadAuto();
+                LoadChannelSettings();
                 LoadDraft();
             }
             if (selected.Length > 0 && unread.ContainsKey(selected)) unread[selected] = 0;
@@ -333,6 +334,7 @@ namespace Chatter.App {
             if (channelIds != null) foreach (HashSet<string> ids in channelIds.Values) currentIds.UnionWith(ids);
             RemoveExpired(translations, currentIds);
             RemoveExpired(translationErrors, currentIds);
+            manualTranslations.RemoveWhere(id => !currentIds.Contains(id));
             attempted.RemoveWhere(id => !currentIds.Contains(id));
         }
 
@@ -424,7 +426,9 @@ namespace Chatter.App {
             } else if (current.Messages.Count == 0) {
                 transcript.SetEmpty("No messages yet", "New lines in " + current.Name + " will show up here.");
             } else {
-                transcript.ShowTranslate = preferences.Endpoint.Length > 0;
+                transcript.ShowTranslate = preferences.Endpoint.Length > 0 || !string.IsNullOrEmpty(preferences.ManualEndpoint);
+                transcript.AllowUpgrade = preferences.HasDistinctManualProvider;
+                transcript.ManualTranslations = manualTranslations;
                 transcript.SetMessages(current.Messages, translations, translationErrors, stick);
             }
             RefreshActions();
@@ -451,11 +455,14 @@ namespace Chatter.App {
             ChatChannel channel = Current();
             bool hasDraft = draft.Input.Text.Trim().Length > 0;
             bool live = snapshot != null && snapshot.Connected == true && reading;
-            send.Enabled = !busy && !preparingTranslator && channel != null && hasDraft && live && preferences.Endpoint.Length > 0;
-            previewButton.Enabled = !busy && !preparingTranslator && hasDraft && preferences.Endpoint.Length > 0;
+            bool waiting = preparingTranslator && preferences.Endpoint == ChatRules.LocalTranslator;
+            send.Enabled = !busy && !waiting && channel != null && hasDraft && live && preferences.Endpoint.Length > 0;
+            previewButton.Enabled = !busy && !waiting && hasDraft && preferences.Endpoint.Length > 0;
             check.Enabled = !busy && channel != null && live;
             preferencesButton.Enabled = !busy && !preparingTranslator;
             draft.Input.Enabled = channel != null;
+            incomingButton.Enabled = selected.Length > 0;
+            auto.Enabled = selected.Length > 0;
             languageButton.Caption = LanguageLabel(OutgoingLanguage());
         }
 
@@ -469,7 +476,7 @@ namespace Chatter.App {
             if (selected == name) return;
             selected = name;
             viewSignature = "";
-            LoadAuto();
+            LoadChannelSettings();
             LoadDraft();
             Render();
             KickAuto();
@@ -492,28 +499,36 @@ namespace Chatter.App {
             LayoutChrome();
         }
 
-        void LoadAuto() {
+        void LoadChannelSettings() {
             suppress = true;
-            bool choice;
-            if (autoChoices.TryGetValue(ChoiceKey(), out choice)) auto.On = choice;
-            else auto.On = preferences.AutoTranslateIncoming;
+            incomingButton.Caption = LanguageLabel(IncomingLanguage());
+            ChannelPreference channel = preferences.FindChannel(selected);
+            auto.On = channel != null && channel.AutoTranslate.HasValue ? channel.AutoTranslate.Value : preferences.AutoTranslateIncoming;
+            bool ready = selected.Length > 0;
+            incomingButton.Enabled = ready;
+            auto.Enabled = ready;
             suppress = false;
         }
 
+        string IncomingLanguage() {
+            ChannelPreference channel = preferences.FindChannel(selected);
+            if (channel != null && channel.IncomingLanguage.Length > 0) return channel.IncomingLanguage;
+            return preferences.IncomingLanguage;
+        }
+
         string OutgoingLanguage() {
-            string language;
-            if (outgoingLanguages.TryGetValue(selected, out language)) return language;
+            ChannelPreference channel = preferences.FindChannel(selected);
+            if (channel != null && channel.OutgoingLanguage.Length > 0) return channel.OutgoingLanguage;
             return preferences.OutgoingLanguage == "channel" ? ChatRules.ChannelLanguage(selected) : preferences.OutgoingLanguage;
         }
 
-        string ChoiceKey() {
-            return preferences.Endpoint + "\0" + LanguageId(true) + "\0" + selected;
-        }
-
-        string LanguageId(bool incoming) {
-            string caption = incoming ? incomingButton.Caption : languageButton.Caption;
-            for (int i = 0; i < ChatRules.Languages.Length; i++) if (ChatRules.LanguageNames[i] == caption) return ChatRules.Languages[i];
-            return "en";
+        void StoreFor(string name, Action<ChannelPreference> edit) {
+            if (string.IsNullOrEmpty(name)) return;
+            ChannelPreference current = preferences.FindChannel(name);
+            var entry = current == null ? new ChannelPreference { Name = name } : current.Copy();
+            edit(entry);
+            if (!preferences.Remember(entry)) return;
+            SavePreferences();
         }
 
         static string LanguageLabel(string id) {
@@ -524,32 +539,35 @@ namespace Chatter.App {
         void PickLanguage(PillButton source, bool incoming) {
             var menu = new LanguageMenu();
             for (int i = 0; i < ChatRules.Languages.Length; i++)
-                menu.Add(ChatRules.Languages[i], ChatRules.LanguageNames[i], (incoming ? LanguageId(true) : OutgoingLanguage()) == ChatRules.Languages[i]);
+                menu.Add(ChatRules.Languages[i], ChatRules.LanguageNames[i], (incoming ? IncomingLanguage() : OutgoingLanguage()) == ChatRules.Languages[i]);
             var origin = source.PointToScreen(new Point(0, source.Height + 6));
             menu.ShowAt(this, origin, delegate(string id) {
-                if (incoming) {
-                    incomingButton.Caption = LanguageLabel(id);
-                    preferences.IncomingLanguage = id;
-                    SavePreferences();
-                    BumpTranslation();
-                    KickAuto();
-                } else if (selected.Length > 0) {
-                    outgoingLanguages[selected] = id;
-                    languageButton.Caption = LanguageLabel(id);
-                    if (preview.Visible) preview.Visible = false;
-                    LayoutChrome();
-                }
+                if (incoming) SetIncoming(id);
+                else SetOutgoing(id);
             });
         }
 
+        void SetIncoming(string id) {
+            incomingButton.Caption = LanguageLabel(id);
+            if (selected.Length > 0) StoreFor(selected, entry => entry.IncomingLanguage = id);
+            else {
+                preferences.IncomingLanguage = id;
+                SavePreferences();
+            }
+            BumpTranslation();
+            KickAuto();
+        }
+
+        void SetOutgoing(string id) {
+            if (selected.Length == 0) return;
+            StoreFor(selected, entry => entry.OutgoingLanguage = id);
+            languageButton.Caption = LanguageLabel(id);
+            if (preview.Visible) { preview.Visible = false; LayoutChrome(); }
+        }
+
         void ApplyPreferences() {
-            suppress = true;
-            incomingButton.Caption = LanguageLabel(preferences.IncomingLanguage);
-            auto.On = preferences.AutoTranslateIncoming;
-            providerSummary.Text = preferences.Endpoint == ChatRules.LocalTranslator ? "Local translation · on this PC"
-                : preferences.Endpoint == Translator.DeepLFree ? "DeepL API Free · cloud translation"
-                : preferences.Endpoint == Translator.DeepLPro ? "DeepL API Pro · cloud translation" : "Custom LibreTranslate server";
-            suppress = false;
+            providerSummary.Text = preferences.ProviderSummary();
+            LoadChannelSettings();
         }
 
         void OpenPreferences() {
@@ -566,13 +584,11 @@ namespace Chatter.App {
                 if (result != DialogResult.OK) { KickAuto(); return; }
                 preferences = dialog.Result;
             }
-            autoChoices.Clear();
-            outgoingLanguages.Clear();
             preview.Visible = false;
             actionError = notice = "";
             ApplyPreferences();
             BumpTranslation();
-            if (preferences.Endpoint == ChatRules.LocalTranslator) PrepareTranslator();
+            if (preferences.UsesLocalTranslator) PrepareTranslator();
             else KickAuto();
         }
 
@@ -589,6 +605,7 @@ namespace Chatter.App {
             attempted.Clear();
             translations.Clear();
             translationErrors.Clear();
+            manualTranslations.Clear();
             translatorOffline = false;
             Render();
         }
@@ -614,6 +631,7 @@ namespace Chatter.App {
                         actionError = "";
                         attempted.Clear();
                         translationErrors.Clear();
+                        foreach (string id in manualTranslations) attempted.Add(id);
                         Render();
                         KickAuto();
                     });
@@ -621,7 +639,7 @@ namespace Chatter.App {
                     Post(() => {
                         preparingTranslator = false;
                         translatorStatus = "";
-                        translatorOffline = true;
+                        translatorOffline = preferences.Endpoint == ChatRules.LocalTranslator;
                         actionError = ex.Message;
                         Render();
                     });
@@ -653,24 +671,30 @@ namespace Chatter.App {
         }
 
         void KickAuto() {
-            if (editingPreferences || preparingTranslator || !reading || !auto.On || translatorOffline || preferences.Endpoint.Length == 0 || translating) return;
+            bool waiting = preparingTranslator && preferences.Endpoint == ChatRules.LocalTranslator;
+            if (editingPreferences || waiting || !reading || !auto.On || translatorOffline || preferences.Endpoint.Length == 0 || translating) return;
             ChatChannel channel = Current();
             if (channel == null) return;
             for (int i = channel.Messages.Count - 1; i >= 0; i--) {
                 ChatMessage candidate = channel.Messages[i];
                 if (!candidate.Outgoing && !candidate.System && !attempted.Contains(candidate.Id)) {
-                    TranslateOne(candidate);
+                    TranslateOne(candidate, false);
                     return;
                 }
             }
         }
 
-        void TranslateOne(ChatMessage message) {
-            if (translating || preparingTranslator || message.System) return;
+        void TranslateOne(ChatMessage message, bool manual) {
+            if (message == null || message.System || translating) return;
+            bool separate = manual && preferences.HasDistinctManualProvider;
+            string channelName = selected;
+            var request = new TranslationRequest { Text = message.Text, Source = "auto", Target = IncomingLanguage() };
+            preferences.ApplyProvider(request, manual);
+            if (string.IsNullOrEmpty(request.Endpoint)) return;
+            if (preparingTranslator && request.Endpoint == ChatRules.LocalTranslator) return;
             int generation = translationGeneration;
             attempted.Add(message.Id);
             translating = true;
-            var request = new TranslationRequest { Endpoint = preferences.Endpoint, ApiKey = preferences.ApiKey, Text = message.Text, Source = "auto", Target = LanguageId(true) };
             Task.Run(delegate {
                 try {
                     string text = service.Translate(request);
@@ -680,6 +704,8 @@ namespace Chatter.App {
                         translatorOffline = false;
                         translations[message.Id] = text;
                         translationErrors.Remove(message.Id);
+                        if (separate) manualTranslations.Add(message.Id);
+                        else manualTranslations.Remove(message.Id);
                         PruneTranslationState(historyIds);
                         Render();
                         KickAuto();
@@ -691,20 +717,21 @@ namespace Chatter.App {
                         Post(delegate {
                             translating = false;
                             if (generation != translationGeneration) { KickAuto(); return; }
-                            if (offline) {
+                            if (separate) translationErrors[message.Id] = error;
+                            else if (offline) {
                                 translatorOffline = true;
                                 attempted.Remove(message.Id);
                             } else {
                                 translationErrors[message.Id] = error;
                                 if (Translator.IsDeepL(request.Endpoint)) {
-                                    auto.On = false;
-                                    autoChoices[ChoiceKey()] = false;
+                                    StoreFor(channelName, entry => entry.AutoTranslate = false);
+                                    if (selected == channelName) auto.On = false;
                                     actionError = error;
                                 }
                             }
                             PruneTranslationState(historyIds);
                             Render();
-                            if (!offline && !Translator.IsDeepL(request.Endpoint)) KickAuto();
+                            if (!separate && !offline && !Translator.IsDeepL(request.Endpoint)) KickAuto();
                         });
                     } catch (InvalidOperationException) { }
                 }
@@ -712,7 +739,8 @@ namespace Chatter.App {
         }
 
         void PreviewDraft() {
-            if (busy || preparingTranslator || draft.Input.Text.Trim().Length == 0) return;
+            bool waiting = preparingTranslator && preferences.Endpoint == ChatRules.LocalTranslator;
+            if (busy || waiting || draft.Input.Text.Trim().Length == 0) return;
             busy = true;
             actionError = "";
             notice = "";
@@ -721,7 +749,8 @@ namespace Chatter.App {
             int generation = translationGeneration;
             string previewChannel = selected;
             RefreshActions();
-            var request = new TranslationRequest { Endpoint = preferences.Endpoint, ApiKey = preferences.ApiKey, Text = text, Source = "en", Target = language };
+            var request = new TranslationRequest { Text = text, Source = "en", Target = language };
+            preferences.ApplyProvider(request, false);
             Task.Run(delegate {
                 try {
                     string translated = service.Translate(request);
@@ -750,7 +779,8 @@ namespace Chatter.App {
 
         void TranslateAndSend() {
             ChatChannel channel = Current();
-            if (busy || preparingTranslator || !reading || channel == null || draft.Input.Text.Trim().Length == 0 || preferences.Endpoint.Length == 0) return;
+            bool waiting = preparingTranslator && preferences.Endpoint == ChatRules.LocalTranslator;
+            if (busy || waiting || !reading || channel == null || draft.Input.Text.Trim().Length == 0 || preferences.Endpoint.Length == 0) return;
             if (snapshot == null || snapshot.Connected != true) return;
             busy = true;
             actionError = "";
@@ -759,7 +789,8 @@ namespace Chatter.App {
             string text = draft.Input.Text;
             string language = OutgoingLanguage();
             RefreshActions();
-            var request = new TranslationRequest { Endpoint = preferences.Endpoint, ApiKey = preferences.ApiKey, Text = text, Source = "en", Target = language };
+            var request = new TranslationRequest { Text = text, Source = "en", Target = language };
+            preferences.ApplyProvider(request, false);
             Task.Run(delegate {
                 try {
                     SendReceipt receipt = service.TranslateAndSend(target, request);

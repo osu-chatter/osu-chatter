@@ -100,6 +100,34 @@ namespace Chatter.Tests {
                 values["encryptedKey"] = "invalid";
                 File.WriteAllText(path, new JavaScriptSerializer().Serialize(values));
                 Check(!PreferencesStore.TryLoad(out _, path), "invalid key accepted");
+                File.WriteAllText(path, "{\"version\":1,\"endpoint\":\"local\",\"encryptedKey\":\"\",\"incomingLanguage\":\"en\",\"outgoingLanguage\":\"channel\",\"autoTranslateIncoming\":true,\"startReading\":true}");
+                Check(PreferencesStore.TryLoad(out loaded, path) && loaded.Endpoint == ChatRules.LocalTranslator && loaded.ManualEndpoint == "" && loaded.Channels.Count == 0, "version 1 settings");
+                source = new AppPreferences {
+                    Endpoint = "https://libre.example/translate", ApiKey = "libre-key", ManualEndpoint = Translator.DeepLFree, ManualApiKey = "manual-secret",
+                    IncomingLanguage = "en", OutgoingLanguage = "channel", AutoTranslateIncoming = true
+                };
+                Check(source.Remember(new ChannelPreference { Name = "#osu", IncomingLanguage = "pl", OutgoingLanguage = "ja", AutoTranslate = false }), "channel saved");
+                Check(source.Remember(new ChannelPreference { Name = "игрок", IncomingLanguage = "ru", AutoTranslate = true }), "unicode channel");
+                PreferencesStore.Save(source, path);
+                string disk = File.ReadAllText(path);
+                Check(!disk.Contains("libre-key") && !disk.Contains("manual-secret"), "manual key on disk");
+                Check(PreferencesStore.TryLoad(out loaded, path), "dual providers read");
+                Check(loaded.Endpoint == source.Endpoint && loaded.ApiKey == "libre-key" && loaded.ManualEndpoint == Translator.DeepLFree && loaded.ManualApiKey == "manual-secret", "provider roundtrip");
+                var osu = loaded.FindChannel("#osu");
+                var player = loaded.FindChannel("игрок");
+                Check(osu != null && osu.IncomingLanguage == "pl" && osu.OutgoingLanguage == "ja" && osu.AutoTranslate == false, "osu channel roundtrip");
+                Check(player != null && player.IncomingLanguage == "ru" && player.AutoTranslate == true && player.OutgoingLanguage == "", "player channel roundtrip");
+                var rows = (System.Collections.ArrayList)new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(disk)["channels"];
+                rows.Add(new Dictionary<string, object> { { "name", "bad\nname" }, { "incoming", "nope" } });
+                var document = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(disk);
+                document["channels"] = rows;
+                File.WriteAllText(path, new JavaScriptSerializer().Serialize(document));
+                Check(PreferencesStore.TryLoad(out loaded, path) && loaded.FindChannel("#osu") != null && loaded.FindChannel("bad\nname") == null, "invalid channel rejected the file");
+                var crowded = new AppPreferences();
+                for (int i = 0; i < AppPreferences.MaxChannels + 1; i++)
+                    Check(crowded.Remember(new ChannelPreference { Name = "#c" + i }), "remember channel");
+                Check(crowded.Channels.Count == AppPreferences.MaxChannels && crowded.FindChannel("#c0") == null && crowded.FindChannel("#c" + AppPreferences.MaxChannels) != null, "oldest conversation dropped");
+                Check(!crowded.Remember(new ChannelPreference { Name = "bad\rname" }), "invalid conversation name");
             } finally { File.Delete(path); Directory.Delete(directory); }
         }
         public static void Setup() {
@@ -125,6 +153,27 @@ namespace Chatter.Tests {
             }
             using (var setup = new SetupForm(new AppPreferences { Endpoint = Translator.DeepLPro, ApiKey = "fixture-test-key", AutoTranslateIncoming = true }, false, false))
                 Check(((CheckBox)Get(setup, "automatic")).Checked, "saved cloud preference was lost");
+            var current = new AppPreferences {
+                Endpoint = "https://libre.example/translate", ApiKey = "libre-key", ManualEndpoint = Translator.DeepLFree, ManualApiKey = "deepl-key",
+                IncomingLanguage = "en", OutgoingLanguage = "channel", AutoTranslateIncoming = true
+            };
+            current.Remember(new ChannelPreference { Name = "#osu", IncomingLanguage = "pl", OutgoingLanguage = "ja", AutoTranslate = false });
+            using (var setup = new SetupForm(current, false, false)) {
+                Check(((ComboBox)Get(setup, "provider")).SelectedIndex == 3, "automatic libre");
+                Check(((ComboBox)Get(setup, "manualProvider")).SelectedIndex == 2, "manual deepl");
+                Check(((TextBox)Get(Get(setup, "manualKey"), "Input")).Text == "deepl-key", "manual key loaded");
+                Check(((TextBox)Get(Get(setup, "key"), "Input")).Text == "libre-key", "automatic key loaded");
+                ((ComboBox)Get(setup, "manualProvider")).SelectedIndex = 3;
+                Check(((TextBox)Get(Get(setup, "manualKey"), "Input")).Text == "deepl-key", "Free/Pro switch cleared the manual key");
+                ((ComboBox)Get(setup, "manualProvider")).SelectedIndex = 4;
+                Check(((TextBox)Get(Get(setup, "manualKey"), "Input")).Text.Length == 0, "manual key carried to LibreTranslate");
+                ((ComboBox)Get(setup, "manualProvider")).SelectedIndex = 2;
+                ((TextBox)Get(Get(setup, "manualKey"), "Input")).Text = "deepl-key";
+                Call(setup, "SaveChoices");
+                Check(setup.Result != null && setup.Result.Endpoint == current.Endpoint && setup.Result.ApiKey == "libre-key" && setup.Result.ManualEndpoint == Translator.DeepLFree && setup.Result.ManualApiKey == "deepl-key", "both providers saved");
+                var kept = setup.Result.FindChannel("#osu");
+                Check(kept != null && kept.IncomingLanguage == "pl" && kept.OutgoingLanguage == "ja" && kept.AutoTranslate == false, "channel settings survived the dialog");
+            }
             using (var main = new MainForm(new AppPreferences { Endpoint = Translator.DeepLFree, ApiKey = "fixture-test-key", AutoTranslateIncoming = false, StartReading = false, OutgoingLanguage = "pl" })) {
                 var handle = main.Handle;
                 main.GetType().GetMethod("OnShown", Members).Invoke(main, new object[] { EventArgs.Empty });
@@ -134,6 +183,66 @@ namespace Chatter.Tests {
                 var preferences = (AppPreferences)Get(main, "preferences");
                 Check(preferences.Endpoint == Translator.DeepLFree && preferences.ApiKey == "fixture-test-key", "saved cloud preferences were not loaded");
             }
+        }
+        public static void Channels() {
+            var prefs = new AppPreferences {
+                Endpoint = "https://libre.example/translate", ApiKey = "libre-key", ManualEndpoint = Translator.DeepLFree, ManualApiKey = "deepl-key",
+                IncomingLanguage = "en", OutgoingLanguage = "channel", AutoTranslateIncoming = true
+            };
+            var request = new TranslationRequest { Text = "hello", Source = "en", Target = "pl" };
+            prefs.ApplyProvider(request, false);
+            Check(request.Endpoint == prefs.Endpoint && request.ApiKey == "libre-key", "automatic provider");
+            prefs.ApplyProvider(request, true);
+            Check(request.Endpoint == Translator.DeepLFree && request.ApiKey == "deepl-key", "manual provider");
+            prefs.ManualEndpoint = "";
+            prefs.ApplyProvider(request, true);
+            Check(request.Endpoint == prefs.Endpoint, "manual falls back to automatic");
+            prefs.ManualEndpoint = Translator.DeepLFree;
+            Check(prefs.HasDistinctManualProvider && prefs.ProviderSummary().Contains("Translate button") && prefs.ProviderSummary().Contains("DeepL API Free"), "provider summary");
+            prefs.Remember(new ChannelPreference { Name = "#osu", IncomingLanguage = "pl", OutgoingLanguage = "ja", AutoTranslate = false });
+            using (var main = new MainForm(prefs) { DemoMode = true }) {
+                var handle = main.Handle;
+                Call(main, "ApplyPreferences");
+                var summary = (Label)Get(main, "providerSummary");
+                Check(summary.Text.Contains("LibreTranslate") && summary.Text.Contains("Translate button"), "settings summary");
+                Invoke(main, "Select", "#osu");
+                Check(Caption(main, "incomingButton") == "Polish", "channel incoming");
+                Check(Caption(main, "languageButton") == "Japanese", "channel outgoing");
+                Check(On(main) == false, "channel auto");
+                Invoke(main, "Select", "#russian");
+                Check(Caption(main, "incomingButton") == "English", "default incoming");
+                Check(Caption(main, "languageButton") == "Russian", "default outgoing");
+                Check(On(main), "default auto");
+                Invoke(main, "SetIncoming", "de");
+                Invoke(main, "SetOutgoing", "ko");
+                Click(Get(main, "auto"));
+                Invoke(main, "Select", "#osu");
+                Check(Caption(main, "incomingButton") == "Polish" && On(main) == false && Caption(main, "languageButton") == "Japanese", "first channel preserved");
+                Invoke(main, "Select", "#russian");
+                Check(Caption(main, "incomingButton") == "German" && Caption(main, "languageButton") == "Korean" && On(main) == false, "edits preserved");
+                var stored = ((AppPreferences)Get(main, "preferences")).FindChannel("#russian");
+                Check(stored != null && stored.IncomingLanguage == "de" && stored.OutgoingLanguage == "ko" && stored.AutoTranslate == false, "channel record");
+                var original = ((AppPreferences)Get(main, "preferences")).FindChannel("#osu");
+                Check(original != null && original.IncomingLanguage == "pl" && original.OutgoingLanguage == "ja" && original.AutoTranslate == false, "other channel record");
+            }
+        }
+        static string Caption(object main, string field) {
+            object button = Get(main, field);
+            return (string)button.GetType().GetProperty("Caption").GetValue(button, null);
+        }
+        static bool On(object main) {
+            object box = Get(main, "auto");
+            return (bool)box.GetType().GetProperty("On").GetValue(box, null);
+        }
+        static void Click(object control) {
+            control.GetType().GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic, null, new[] { typeof(EventArgs) }, null).Invoke(control, new object[] { EventArgs.Empty });
+        }
+        static void Invoke(object target, string name, params object[] args) {
+            var types = new Type[args.Length];
+            for (int i = 0; i < args.Length; i++) types[i] = args[i] == null ? typeof(object) : args[i].GetType();
+            var method = target.GetType().GetMethod(name, Members, null, types, null);
+            if (method == null) throw new MissingMethodException(name);
+            method.Invoke(target, args);
         }
     }
 }

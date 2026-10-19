@@ -111,6 +111,66 @@ namespace Chatter.Tests {
                 Check(restartedWorker.WaitForExit(5000), "worker survives app disposal");
             }
         }
+        public static void Profiles() {
+            using (var view = View()) {
+                string playing = "is playing xi - Blue Zenith [FOUR DIMENSIONS]";
+                string source = "[https://osu.ppy.sh/b/658127 " + playing + "]";
+                var messages = new List<ChatMessage> {
+                    new ChatMessage("a", "Friend", playing, "12:30:00", false, false, source),
+                    new ChatMessage("b", "Friend", "still here", "12:30:20", false, false),
+                    new ChatMessage("c", "Other", "hello", "12:31:00", false, false)
+                };
+                view.GetType().GetField("Players", Fields).SetValue(view, (Func<string, PlayerFace>)(name =>
+                    name == "Friend" ? new PlayerFace(0, true, null) : new PlayerFace(15, false, null)));
+                string opened = null;
+                bool translated = false;
+                view.GetType().GetField("Open", Fields).SetValue(view, (Func<string, bool>)(url => { opened = url; return true; }));
+                view.GetType().GetEvent("TranslateRequested").AddEventHandler(view, (Action<ChatMessage>)(message => translated = true));
+                Call(view, "SetMessages", messages, new Dictionary<string, string>(), new Dictionary<string, string>(), true);
+                IList blocks = (IList)Get(view, "blocks");
+                Check(blocks.Count == 3, "blocks");
+                Check((bool)Get(blocks[0], "ShowAvatar") && !(bool)Get(blocks[1], "ShowAvatar") && (bool)Get(blocks[2], "ShowAvatar"), "avatar only on the first of a group");
+                var friendLinks = (IList)Get(blocks[0], "Links");
+                Check(friendLinks.Count > 0, "playing line has a link");
+                int scroll = Scroll(view);
+                var friendBubble = (Rectangle)Get(blocks[0], "Bubble");
+                var friendAvatar = (Rectangle)Get(blocks[0], "Avatar");
+                var otherBubble = (Rectangle)Get(blocks[2], "Bubble");
+                var otherAvatar = (Rectangle)Get(blocks[2], "Avatar");
+                using (var bitmap = Paint(view)) {
+                    Check(HasGold(bitmap, new Rectangle(friendAvatar.X, friendBubble.Y - scroll + friendAvatar.Y, friendAvatar.Width, friendAvatar.Height)), "supporter ring");
+                    Check(!HasGold(bitmap, new Rectangle(otherAvatar.X, otherBubble.Y - scroll + otherAvatar.Y, otherAvatar.Width, otherAvatar.Height)), "plain avatar has no ring");
+                }
+                var translate = (Rectangle)Get(blocks[0], "Translate");
+                Call(view, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, translate.X + 4, translate.Y - scroll + 4, 0));
+                Check(translated && opened == null, "translate click opened a link");
+                var linkBounds = (Rectangle)Get(friendLinks[0], "Bounds");
+                int linkX = friendBubble.X + 14 + linkBounds.X + Math.Min(8, Math.Max(0, linkBounds.Width / 4));
+                int linkY = friendBubble.Y - scroll + 10 + linkBounds.Y + Math.Max(1, linkBounds.Height / 2);
+                Check(!translate.Contains(linkX, linkY + scroll), "link overlaps translate");
+                Call(view, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, linkX, linkY, 0));
+                Check(opened == "https://osu.ppy.sh/b/658127", "map link " + opened);
+                var friendHit = new Rectangle(friendAvatar.X, friendBubble.Y - scroll + friendAvatar.Y, friendAvatar.Width, friendAvatar.Height);
+                opened = null;
+                Call(view, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, friendHit.X + 8, friendHit.Y + 8, 0));
+                Check(opened == null, "placeholder id opened a profile");
+                var otherHit = new Rectangle(otherAvatar.X, otherBubble.Y - scroll + otherAvatar.Y, otherAvatar.Width, otherAvatar.Height);
+                Call(view, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, otherHit.X + 8, otherHit.Y + 8, 0));
+                Check(opened == "https://osu.ppy.sh/users/15", "avatar profile " + opened);
+            }
+        }
+        static bool HasGold(Bitmap bitmap, Rectangle rect) {
+            int right = Math.Min(bitmap.Width - 1, rect.Right - 1);
+            int bottom = Math.Min(bitmap.Height - 1, rect.Bottom - 1);
+            for (int y = Math.Max(0, rect.Top); y <= bottom; y++) {
+                for (int x = Math.Max(0, rect.Left); x <= right; x++) {
+                    if (x != rect.Left && x != right && y != rect.Top && y != bottom && x != rect.Left + 1 && y != rect.Top + 1) continue;
+                    Color pixel = bitmap.GetPixel(x, y);
+                    if (pixel.R > 160 && pixel.G > 120 && pixel.B < 180 && pixel.G > pixel.B + 30) return true;
+                }
+            }
+            return false;
+        }
         public static void RoundedControls() {
             Color sidebar = Color.FromArgb(18, 20, 26);
             Color page = Color.FromArgb(12, 13, 16);

@@ -61,7 +61,8 @@ Offsets below are bytes, including the x86 CLR method-table word where applicabl
 | Tab manager | Tab-list pointer at `+0x1C` |
 | Tab | Room pointer at `+12` |
 | Room | Method table at `+0`, name pointer at `+4`, message-list pointer at `+16` |
-| Message | Body pointer at `+4`, sender pointer at `+8`, eight-byte local `DateTime` at `+36` |
+| Message | Body pointer at `+4`, sender pointer at `+8`, markup-object pointer at `+16`, eight-byte local `DateTime` at `+36` |
+| Markup object | Original-text pointer at `+12`. Used only when removing link markup equals the display body. A missing pointer, or text that does not match, leaves the message plain |
 | CLR list | Array pointer at `+4`, count at `+12`, mutation version at `+16` |
 | CLR array | Capacity at `+4`, four-byte items from `+8` |
 | CLR string | Length at `+4`, UTF-16 data at `+8` |
@@ -74,8 +75,9 @@ Graph checks and interpretation to preserve:
 - Lists require an address `>= 0x10000`, readable array/count/capacity/version, count no larger than its limit or capacity, and capacity at most 65,536. Read only the last 200 messages per room.
 - Graph strings require address `>= 0x10000`, readable length/data, at most 4096 code units, and valid surrogate pairing; empty strings are allowed. `Word` requires exactly four bytes.
 - Timestamp data must be readable; mask with `0x3fffffffffffffff`, then require ticks in `600000000000000000`–`3155378975999999999`. Display local time-of-day using 10,000,000 ticks/second and 86,400 seconds/day.
-- Empty body or sender denotes a system message. An empty body displays the sender text as the body. Strip the matching `HH:mm ` prefix and final colon from sender labels. Compare own names case-insensitively after replacing underscores with spaces. Names starting with `#` are channels; others are private conversations.
-- Re-read body/sender pointers after reading each message. Recheck list array/count/version, room message-list pointer, root all-room/manager pointers, manager tab-list pointer, and selected-room pointer before returning. These checks reject observed concurrent mutation; they do not provide an atomic snapshot or identify a game build.
+- Empty body or sender denotes a system message. An empty body displays the sender text as the body. When a sender label starts with the matching `HH:mm ` prefix, strip that prefix, then one trailing colon, then one leading `*`. The `*` marks an action line such as playing or listening. It is not a supporter flag. Compare own names case-insensitively after replacing underscores with spaces. Names starting with `#` are channels; others are private conversations.
+- When message +16 addresses an object (`>= 0x10000`), read the original text from that object's +12 and re-read both pointers. If either pointer changes, reject the snapshot. Keep the original text only when its visible form equals the display body. A markup pointer below `0x10000` leaves the message plain and does not fail the read. System messages stay plain.
+- Re-read body/sender pointers after reading each message. Recheck list array/count/version, room message-list pointer, root all-room/manager pointers, manager tab-list pointer, and selected-room pointer before returning. These checks reject observed concurrent mutation; they do not provide an atomic snapshot or identify a game build. The markup pointer is re-read only when it addresses an object, so a zero word is read once.
 - Message IDs use ticks, channel, processed display sender, and text in an FNV-style hash plus a duplicate occurrence index. Keep IDs independent of object addresses and keep rendering/unread behavior stable during extraction.
 
 ### In-process names (`Chatter.Bridge/Bridge.cs`)

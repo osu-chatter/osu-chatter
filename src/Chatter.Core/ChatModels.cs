@@ -4,13 +4,14 @@ using Chatter.Shared;
 
 namespace Chatter {
     public sealed class ChatMessage {
-        public ChatMessage(string id, string sender, string text, string time, bool outgoing, bool system) {
+        public ChatMessage(string id, string sender, string text, string time, bool outgoing, bool system, string? source = null) {
             Id = id;
             Sender = sender;
             Text = text;
             Time = time;
             Outgoing = outgoing;
             System = system;
+            Source = string.IsNullOrEmpty(source) ? text : source!;
         }
 
         public string Id { get; }
@@ -19,6 +20,8 @@ namespace Chatter {
         public string Time { get; }
         public bool Outgoing { get; }
         public bool System { get; }
+        /// <summary>Original message text when it carries link markup. Otherwise the same as <see cref="Text"/>.</summary>
+        public string Source { get; }
     }
 
     public sealed class ChatChannel {
@@ -36,17 +39,19 @@ namespace Chatter {
     }
 
     public sealed class ChatSnapshot {
-        public ChatSnapshot(int session, bool? connected, string account, IReadOnlyList<ChatChannel> channels) {
+        public ChatSnapshot(int session, bool? connected, string account, IReadOnlyList<ChatChannel> channels, int accountId = 0) {
             Session = session;
             Connected = connected;
             Account = account ?? "";
             Channels = channels;
+            AccountId = accountId;
         }
 
         public int Session { get; }
         public bool? Connected { get; }
         public string Account { get; }
         public IReadOnlyList<ChatChannel> Channels { get; }
+        public int AccountId { get; }
     }
 
     public sealed class SendReceipt {

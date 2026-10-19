@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Globalization;
 using System.Windows.Forms;
 using Chatter;
 
@@ -108,13 +111,27 @@ namespace Chatter.App {
     }
 
     sealed class TranscriptView : Control {
+        const int AvatarSize = 28;
+        const int AvatarGap = 8;
+        const int Side = 16;
+        static readonly Color SupporterName = Color.FromArgb(244, 211, 140);
+        static readonly Color SupporterRing = Color.FromArgb(232, 196, 122);
+
         sealed class Block {
             public ChatMessage Message;
             public Rectangle Bubble;
             public Rectangle Translate;
             public bool HasTranslate;
             public bool ShowSender;
+            public bool ShowAvatar;
+            public Rectangle Avatar;
             public string LinkCaption = "";
+            public List<TextLink> Links = new List<TextLink>();
+        }
+
+        sealed class TextLink {
+            public Rectangle Bounds;
+            public string Url = "";
         }
 
         readonly List<Block> blocks = new List<Block>();
@@ -132,12 +149,16 @@ namespace Chatter.App {
         public string EmptyTitle = "";
         public string EmptyBody = "";
         public event Action<ChatMessage> TranslateRequested;
+        public Func<string, PlayerFace?>? Players;
+        internal Func<string, bool>? Open;
+        string hotUrl = "";
         readonly HashSet<string> appliedManual = new HashSet<string>();
         bool appliedUpgrade;
 
         public TranscriptView() {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Palette.Bg;
+            Open = null;
         }
 
         public void SetMessages(IReadOnlyList<ChatMessage> next, Dictionary<string, string> translated, Dictionary<string, string> failed, bool stick) {
@@ -221,9 +242,13 @@ namespace Chatter.App {
                 if (!string.IsNullOrEmpty(error)) extra += PaintKit.Measure(error, UiFont.Small, textWidth).Height + 8;
                 if (link && !string.IsNullOrEmpty(error)) extra += 16;
                 int bubbleHeight = 12 + body.Height + extra;
-                int x = message.Outgoing ? Width - bubbleWidth - 22 : 20;
+                int gutter = Side + AvatarSize + AvatarGap;
+                int x = message.Outgoing ? Width - bubbleWidth - gutter : gutter;
                 y += nameGap;
                 block.Bubble = new Rectangle(x, y, bubbleWidth, bubbleHeight);
+                block.ShowAvatar = !grouped;
+                block.Avatar = new Rectangle(message.Outgoing ? x + bubbleWidth + AvatarGap : Side, block.ShowSender ? -20 : 0, AvatarSize, AvatarSize);
+                block.Links = LayoutLinks(message.Text, ChatLinks.Find(message.Text, message.Source), textWidth);
                 block.HasTranslate = link;
                 block.LinkCaption = linkCaption;
                 if (link) block.Translate = new Rectangle(x + 14, y + bubbleHeight - 22, linkWidth, 18);
@@ -278,15 +303,18 @@ namespace Chatter.App {
                     TextRenderer.DrawText(g, message.Text, UiFont.Small, bubble, Palette.Faint, PaintKit.Wrap | TextFormatFlags.HorizontalCenter);
                     continue;
                 }
+                if (block.ShowAvatar) DrawAvatar(g, new Rectangle(block.Avatar.X, bubble.Y + block.Avatar.Y, block.Avatar.Width, block.Avatar.Height), message);
                 if (block.ShowSender) {
                     var name = new Rectangle(bubble.X + 4, bubble.Y - 18, bubble.Width, 16);
-                    TextRenderer.DrawText(g, message.Sender, UiFont.Name, name, Palette.Muted, PaintKit.Single);
+                    PlayerFace? face = FaceOf(message.Sender);
+                    TextRenderer.DrawText(g, message.Sender, UiFont.Name, name, face != null && face.Supporter ? SupporterName : Palette.Muted, PaintKit.Single);
                 }
                 PaintKit.FillRound(g, bubble, 10, message.Outgoing ? Palette.BubbleOut : Palette.BubbleIn);
                 PaintKit.StrokeRound(g, bubble, 10, message.Outgoing ? Color.FromArgb(103, 45, 65) : Color.FromArgb(40, 46, 57));
                 int textWidth = bubble.Width - 28;
                 var bodyRect = new Rectangle(bubble.X + 14, bubble.Y + 10, textWidth, bubble.Height - 20);
                 TextRenderer.DrawText(g, message.Text, UiFont.Message, bodyRect, Palette.Ink, PaintKit.Wrap);
+                DrawLinkLines(g, block, bodyRect);
                 var bodySize = PaintKit.Measure(message.Text, UiFont.Message, textWidth);
                 int cursor = bodyRect.Y + bodySize.Height + 8;
                 string translated;
@@ -338,6 +366,16 @@ namespace Chatter.App {
                     return;
                 }
             }
+            TextLink? chatLink;
+            if (HitLink(e.Location, out chatLink) && chatLink != null) {
+                OpenExternal(chatLink.Url);
+                return;
+            }
+            int profileId;
+            if (HitAvatar(e.Location, out profileId) && profileId > 0) {
+                OpenExternal("https://osu.ppy.sh/users/" + profileId.ToString(CultureInfo.InvariantCulture));
+                return;
+            }
             int max = MaxScroll();
             if (max > 0 && e.X >= Width - 12) {
                 dragging = true;
@@ -352,8 +390,14 @@ namespace Chatter.App {
         }
 
         protected override void OnMouseMove(MouseEventArgs e) {
-            bool overLink = blocks.Exists(block => block.HasTranslate && new Rectangle(block.Translate.X, block.Translate.Y - scroll, block.Translate.Width, block.Translate.Height).Contains(e.Location));
-            Cursor = overLink || e.X >= Width - 12 ? Cursors.Hand : Cursors.Default;
+            bool overTranslate = blocks.Exists(block => block.HasTranslate && new Rectangle(block.Translate.X, block.Translate.Y - scroll, block.Translate.Width, block.Translate.Height).Contains(e.Location));
+            TextLink? chatLink;
+            bool overLink = HitLink(e.Location, out chatLink);
+            int profileId;
+            bool overAvatar = HitAvatar(e.Location, out profileId) && profileId > 0;
+            Cursor = overTranslate || overLink || overAvatar || e.X >= Width - 12 ? Cursors.Hand : Cursors.Default;
+            string next = overLink && chatLink != null ? chatLink.Url : "";
+            if (next != hotUrl) { hotUrl = next; Invalidate(); }
             if (dragging) {
                 DragTo(e.Y);
             }
@@ -403,7 +447,7 @@ namespace Chatter.App {
             for (int i = 0; i < next.Count; i++) {
                 var a = next[i]; var b = messages[i];
                 if (a.Id != b.Id || a.Text != b.Text || a.Sender != b.Sender || a.Time != b.Time
-                    || a.Outgoing != b.Outgoing || a.System != b.System) return false;
+                    || a.Outgoing != b.Outgoing || a.System != b.System || a.Source != b.Source) return false;
             }
             return true;
         }
@@ -433,6 +477,201 @@ namespace Chatter.App {
             if (value < 0) return 0;
             int max = MaxScroll();
             return value > max ? max : value;
+        }
+
+        PlayerFace? FaceOf(string name) {
+            if (Players == null || string.IsNullOrEmpty(name)) return null;
+            try { return Players(name); }
+            catch { return null; }
+        }
+
+        void DrawAvatar(Graphics g, Rectangle rect, ChatMessage message) {
+            PlayerFace? face = FaceOf(message.Sender);
+            Image? image = face == null ? null : face.Image;
+            bool supporter = face != null && face.Supporter;
+            GraphicsState state = g.Save();
+            try {
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                if (image != null) {
+                    using (var path = new GraphicsPath()) {
+                        path.AddEllipse(rect);
+                        g.SetClip(path);
+                        if (ImageAnimator.CanAnimate(image)) ImageAnimator.UpdateFrames(image);
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.DrawImage(image, rect);
+                    }
+                } else {
+                    using (var brush = new SolidBrush(Palette.Field)) g.FillEllipse(brush, rect);
+                    TextRenderer.DrawText(g, Initial(message.Sender), UiFont.Name, rect, Palette.Ink, PaintKit.Single | TextFormatFlags.HorizontalCenter);
+                }
+            } catch {
+                using (var brush = new SolidBrush(Palette.Field)) g.FillEllipse(brush, rect);
+            }
+            g.Restore(state);
+            if (!supporter) return;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var pen = new Pen(SupporterRing, 2f))
+                g.DrawEllipse(pen, rect.X + 1, rect.Y + 1, rect.Width - 3, rect.Height - 3);
+        }
+
+        void DrawLinkLines(Graphics g, Block block, Rectangle body) {
+            if (block.Links == null || block.Links.Count == 0) return;
+            SmoothingMode previous = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.None;
+            for (int i = 0; i < block.Links.Count; i++) {
+                TextLink link = block.Links[i];
+                bool hot = hotUrl.Length > 0 && link.Url == hotUrl;
+                using (var pen = new Pen(hot ? Palette.Accent : Color.FromArgb(170, 186, 196, 210))) {
+                    int y = body.Y + link.Bounds.Bottom - 2;
+                    g.DrawLine(pen, body.X + link.Bounds.X, y, body.X + link.Bounds.Right, y);
+                }
+            }
+            g.SmoothingMode = previous;
+        }
+
+        bool HitLink(Point point, out TextLink? found) {
+            found = null;
+            for (int i = 0; i < blocks.Count; i++) {
+                Block block = blocks[i];
+                if (block.HasTranslate) {
+                    var translate = block.Translate;
+                    translate.Y -= scroll;
+                    if (translate.Contains(point)) return false;
+                }
+                if (block.Links == null) continue;
+                int originX = block.Bubble.X + 14;
+                int originY = block.Bubble.Y - scroll + 10;
+                for (int j = 0; j < block.Links.Count; j++) {
+                    TextLink link = block.Links[j];
+                    var rect = new Rectangle(originX + link.Bounds.X, originY + link.Bounds.Y, link.Bounds.Width, link.Bounds.Height);
+                    if (!rect.Contains(point)) continue;
+                    found = link;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        bool HitAvatar(Point point, out int id) {
+            id = 0;
+            for (int i = 0; i < blocks.Count; i++) {
+                Block block = blocks[i];
+                if (!block.ShowAvatar || block.Message == null) continue;
+                var rect = new Rectangle(block.Avatar.X, block.Bubble.Y - scroll + block.Avatar.Y, block.Avatar.Width, block.Avatar.Height);
+                if (!rect.Contains(point)) continue;
+                PlayerFace? face = FaceOf(block.Message.Sender);
+                id = face == null ? 0 : face.Id;
+                return true;
+            }
+            return false;
+        }
+
+        void OpenExternal(string url) {
+            if (!ChatLinks.CanOpen(url)) return;
+            if (Open != null) {
+                try { if (Open(url)) return; }
+                catch { return; }
+            }
+            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
+            catch { }
+        }
+
+        static string Initial(string name) {
+            int i = 0;
+            while (i < name.Length && char.IsWhiteSpace(name[i])) i++;
+            if (i >= name.Length) return "?";
+            if (char.IsHighSurrogate(name[i]) && i + 1 < name.Length) return name.Substring(i, 2);
+            return char.ToUpperInvariant(name[i]).ToString();
+        }
+
+        static List<TextLink> LayoutLinks(string text, List<ChatLinks.Span> spans, int width) {
+            var links = new List<TextLink>();
+            if (spans == null || spans.Count == 0 || string.IsNullOrEmpty(text) || width <= 0) return links;
+            int lineHeight = TextRenderer.MeasureText("Ay", UiFont.Message, new Size(Math.Max(1, width), int.MaxValue), PaintKit.Single).Height;
+            if (lineHeight < 1) lineHeight = UiFont.Message.Height;
+            int limit = PaintKit.Measure(text, UiFont.Message, width).Height;
+            if (limit < lineHeight) limit = lineHeight;
+            int x = 0;
+            int y = 0;
+            int index = 0;
+            while (index < text.Length && y < limit) {
+                char c = text[index];
+                if (c == '\n') { x = 0; y += lineHeight; index++; continue; }
+                if (c == '\r') { index++; continue; }
+                int end = index + 1;
+                if (char.IsWhiteSpace(c)) {
+                    while (end < text.Length && char.IsWhiteSpace(text[end]) && text[end] != '\n' && text[end] != '\r') end++;
+                } else {
+                    while (end < text.Length && !char.IsWhiteSpace(text[end]) && text[end] != '\n' && text[end] != '\r') end++;
+                }
+                PlaceLink(text, spans, links, index, end, width, lineHeight, limit, ref x, ref y);
+                index = end;
+            }
+            if (links.Count == 0) {
+                for (int i = 0; i < spans.Count; i++) {
+                    if (spans[i].Index > 0 || spans[i].Length < text.Length) continue;
+                    Size size = PaintKit.Measure(text, UiFont.Message, width);
+                    links.Add(new TextLink { Bounds = new Rectangle(0, 0, Math.Max(1, size.Width), Math.Max(1, size.Height)), Url = spans[i].Url });
+                    break;
+                }
+            }
+            return links;
+        }
+
+        static void PlaceLink(string text, List<ChatLinks.Span> spans, List<TextLink> links, int start, int end, int width, int lineHeight, int limit, ref int x, ref int y) {
+            if (start >= end || y >= limit) return;
+            int tokenWidth = TextWidth(text.Substring(start, end - start));
+            if (x > 0 && x + tokenWidth > width) {
+                x = 0;
+                y += lineHeight;
+                if (y >= limit) return;
+            }
+            if (tokenWidth <= width || end == start + 1) {
+                EmitLink(text, spans, links, start, end, x, y, lineHeight, width);
+                x += tokenWidth;
+                return;
+            }
+            int chunk = start;
+            while (chunk < end && y < limit) {
+                int fit = 1;
+                int fitWidth = TextWidth(text.Substring(chunk, 1));
+                while (chunk + fit < end) {
+                    int wider = TextWidth(text.Substring(chunk, fit + 1));
+                    if (wider > width) break;
+                    fit++;
+                    fitWidth = wider;
+                }
+                if (x > 0 && x + fitWidth > width) {
+                    x = 0;
+                    y += lineHeight;
+                    if (y >= limit) return;
+                }
+                EmitLink(text, spans, links, chunk, chunk + fit, x, y, lineHeight, width);
+                x += fitWidth;
+                chunk += fit;
+                if (chunk < end) { x = 0; y += lineHeight; }
+            }
+        }
+
+        static void EmitLink(string text, List<ChatLinks.Span> spans, List<TextLink> links, int start, int end, int x, int y, int lineHeight, int width) {
+            for (int i = 0; i < spans.Count; i++) {
+                ChatLinks.Span span = spans[i];
+                int from = Math.Max(start, span.Index);
+                int to = Math.Min(end, span.Index + span.Length);
+                if (from >= to) continue;
+                int prefix = from == start ? 0 : TextWidth(text.Substring(start, from - start));
+                int piece = TextWidth(text.Substring(from, to - from));
+                if (piece < 1) piece = 1;
+                int left = x + prefix;
+                if (left >= width) continue;
+                if (left + piece > width) piece = width - left;
+                links.Add(new TextLink { Bounds = new Rectangle(left, y, piece, lineHeight), Url = span.Url });
+            }
+        }
+
+        static int TextWidth(string value) {
+            if (string.IsNullOrEmpty(value)) return 0;
+            return TextRenderer.MeasureText(value, UiFont.Message, new Size(10000, 100), PaintKit.Single).Width;
         }
     }
 }

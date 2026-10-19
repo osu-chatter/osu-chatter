@@ -11,6 +11,8 @@ This is an unofficial community project. It is not affiliated with osu! or its d
 ## What it does
 
 - Shows open channel and private-message tabs. Join new channels in osu!stable.
+- Shows a profile picture beside each person, including an animation when osu! has one, and a quiet gold highlight for an active supporter.
+- Opens web and osu! links from chat, including the map or song on an "is playing" or "is listening" line.
 - Keeps your reading position as messages arrive.
 - Translates incoming and outgoing messages using a local translator, DeepL, or a LibreTranslate server. Automatic translation and the Translate button can use different providers.
 - Sends only when you press **Send** or **Enter**. Messages are not retried automatically.
@@ -50,7 +52,9 @@ Local translation supports English, Polish, Russian, Korean, Japanese, Chinese, 
 
 ## Chat and privacy
 
-Chatter reads conversations that are already open in osu!stable. It does not log in to osu!, call the osu! API, join channels, or save chat text to disk. Selecting a conversation in chatter does not change the game's selected tab.
+Chatter reads conversations that are already open in osu!stable. It does not log in to osu!, join channels, or save chat text to disk. Selecting a conversation in chatter does not change the game's selected tab.
+
+Profile pictures and supporter highlights come from the local osu! folder. Chatter reads `presence.db` for a player's id and supporter flag, then shows the picture already cached in `Data\a` when that file is present. If it is missing, chatter requests `https://a.ppy.sh/{id}` using only the numeric id. It does not send chat text or usernames, it does not call the osu! API v1 or v2, and it does not write avatars or presence data to disk. A name that is not in the local presence list is shown with a plain initial.
 
 Sending is always a separate action. Chatter checks the selected account and target before sending; it won't submit commands, blank messages, or messages longer than 400 characters. Use the same Windows privilege level for chatter and osu!stable. Usually neither needs administrator access.
 

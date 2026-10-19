@@ -42,12 +42,16 @@ namespace Chatter.Tests {
             Run("transcript keeps its place", UiTests.Transcript);
             Run("conversation refresh keeps selection", UiTests.Refresh);
             Run("rounded controls match their parent", UiTests.RoundedControls);
+            Run("profile pictures and chat links", UiTests.Profiles);
         }
 
         static void RunChatReadChecks() {
             Run("chat text and direction", GraphTests.Unicode);
             Run("incomplete chat data", GraphTests.Rejects);
             Run("sender labels", GraphTests.SenderLabel);
+            Run("chat links", ProfileTests.Links);
+            Run("presence list", ProfileTests.Presence);
+            Run("link markup and action names", ProfileTests.Markup);
             Run("empty private conversation", GraphTests.PrivateEmpty);
             Run("message identity", GraphTests.Identity);
             Run("chat root scan", GraphTests.RootPattern);

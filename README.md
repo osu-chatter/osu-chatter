@@ -12,7 +12,7 @@ This is an unofficial community project. It is not affiliated with osu! or its d
 
 - Shows open channel and private-message tabs. Join new channels in osu!stable.
 - Keeps your reading position as messages arrive.
-- Translates incoming and outgoing messages using a local translator, DeepL, or a LibreTranslate server.
+- Translates incoming and outgoing messages using a local translator, DeepL, or a LibreTranslate server. Automatic translation and the Translate button can use different providers.
 - Sends only when you press **Send** or **Enter**. Messages are not retried automatically.
 
 ## Download
@@ -42,6 +42,10 @@ On first launch, choose a provider and languages. You can change them later in *
 - **DeepL API:** Enter an API key for the Free or Pro plan. Text sent for translation goes to DeepL and counts toward your API usage. A regular DeepL website subscription does not include an API key.
 - **LibreTranslate:** Enter your server's `/translate` URL and optional API key. Text goes to that server; remote servers must use HTTPS.
 
+You can keep two providers at once. The automatic provider translates new messages when auto-translate is on, and it translates outgoing messages when you preview or send. The manual provider is used when you click **Translate** on a message. For example, use a LibreTranslate server automatically and reserve DeepL for messages you choose to translate. A message that was translated automatically can be translated again with the manual provider.
+
+Each conversation remembers the incoming language, the outgoing language, and whether auto-translate is on. Those choices are saved with your other settings. A conversation you have not customized follows the defaults from translation preferences.
+
 Local translation supports English, Polish, Russian, Korean, Japanese, Chinese, German, French, Spanish, Portuguese, and Ukrainian. Other language pairs translate through English. Results can vary, especially for short messages.
 
 ## Chat and privacy
@@ -50,7 +54,7 @@ Chatter reads conversations that are already open in osu!stable. It does not log
 
 Sending is always a separate action. Chatter checks the selected account and target before sending; it won't submit commands, blank messages, or messages longer than 400 characters. Use the same Windows privilege level for chatter and osu!stable. Usually neither needs administrator access.
 
-Translation providers receive text as described above. Settings are kept under `%LOCALAPPDATA%/osu-chatter/settings.json`; API keys are protected for your Windows account with DPAPI.
+Translation providers receive text as described above. Automatic translation sends text to the automatic provider. Clicking Translate sends that message to the manual provider when one is set. Settings are kept under `%LOCALAPPDATA%/osu-chatter/settings.json`; API keys are protected for your Windows account with DPAPI.
 
 ## Troubleshooting
 

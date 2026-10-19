@@ -114,6 +114,7 @@ namespace Chatter.App {
             public Rectangle Translate;
             public bool HasTranslate;
             public bool ShowSender;
+            public string LinkCaption = "";
         }
 
         readonly List<Block> blocks = new List<Block>();
@@ -126,9 +127,13 @@ namespace Chatter.App {
         bool dragging;
         int grab;
         public bool ShowTranslate = true;
+        public bool AllowUpgrade;
+        public HashSet<string> ManualTranslations = new HashSet<string>();
         public string EmptyTitle = "";
         public string EmptyBody = "";
         public event Action<ChatMessage> TranslateRequested;
+        readonly HashSet<string> appliedManual = new HashSet<string>();
+        bool appliedUpgrade;
 
         public TranscriptView() {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
@@ -137,12 +142,13 @@ namespace Chatter.App {
 
         public void SetMessages(IReadOnlyList<ChatMessage> next, Dictionary<string, string> translated, Dictionary<string, string> failed, bool stick) {
             if (!stick && SameMessages(next) && SameValues(translations, translated) && SameValues(errors, failed)
-                && lastShowTranslate == ShowTranslate) return;
+                && lastShowTranslate == ShowTranslate && appliedUpgrade == AllowUpgrade && SameManual()) return;
             SaveAnchor();
             messages = next ?? new ChatMessage[0];
             translations = translated == null ? new Dictionary<string, string>() : new Dictionary<string, string>(translated);
             errors = failed == null ? new Dictionary<string, string>() : new Dictionary<string, string>(failed);
             lastShowTranslate = ShowTranslate;
+            RememberManual();
             if (stick) { pinned = true; anchorId = null; }
             Relayout();
         }
@@ -200,22 +206,27 @@ namespace Chatter.App {
                 if (!string.IsNullOrEmpty(error)) {
                     errorSize = PaintKit.Measure(error, UiFont.Small, maxText);
                 }
-                bool link = ShowTranslate && !hasTranslation && string.IsNullOrEmpty(error);
+                bool upgraded = appliedManual.Contains(message.Id);
+                bool link = ShowTranslate && !upgraded && (AllowUpgrade || (!hasTranslation && string.IsNullOrEmpty(error)));
+                string linkCaption = hasTranslation ? "Retranslate" : "Translate";
+                int linkWidth = hasTranslation ? 84 : 70;
                 int nameGap = block.ShowSender ? 22 : 0;
                 int bubbleWidth = Math.Max(body.Width, translationSize.Width);
                 bubbleWidth = Math.Max(bubbleWidth, errorSize.Width);
-                bubbleWidth = Math.Min(maxText, Math.Max(link ? 128 : 96, bubbleWidth)) + 28;
+                bubbleWidth = Math.Min(maxText, Math.Max(link ? (hasTranslation ? 156 : 128) : 96, bubbleWidth)) + 28;
                 int textWidth = bubbleWidth - 28;
                 body = PaintKit.Measure(message.Text, UiFont.Message, textWidth);
                 int extra = 26;
                 if (hasTranslation) extra += PaintKit.Measure(translated, UiFont.Body, textWidth).Height + 12;
                 if (!string.IsNullOrEmpty(error)) extra += PaintKit.Measure(error, UiFont.Small, textWidth).Height + 8;
+                if (link && !string.IsNullOrEmpty(error)) extra += 16;
                 int bubbleHeight = 12 + body.Height + extra;
                 int x = message.Outgoing ? Width - bubbleWidth - 22 : 20;
                 y += nameGap;
                 block.Bubble = new Rectangle(x, y, bubbleWidth, bubbleHeight);
                 block.HasTranslate = link;
-                if (link) block.Translate = new Rectangle(x + 14, y + bubbleHeight - 22, 70, 18);
+                block.LinkCaption = linkCaption;
+                if (link) block.Translate = new Rectangle(x + 14, y + bubbleHeight - 22, linkWidth, 18);
                 y += bubbleHeight + (grouped ? 6 : 12);
                 blocks.Add(block);
                 previous = message;
@@ -298,7 +309,7 @@ namespace Chatter.App {
                 if (block.HasTranslate) {
                     var link = block.Translate;
                     link.Y -= scroll;
-                    TextRenderer.DrawText(g, "Translate", UiFont.Small, link, Palette.Muted, PaintKit.Single);
+                    TextRenderer.DrawText(g, block.LinkCaption, UiFont.Small, link, Palette.Muted, PaintKit.Single);
                 }
             }
             int max = MaxScroll();
@@ -369,6 +380,22 @@ namespace Chatter.App {
             if (pinned) return;
             var block = blocks.Find(b => b.Bubble.Bottom >= scroll);
             if (block != null) { anchorId = block.Message.Id; anchorOffset = block.Bubble.Top - scroll; }
+        }
+
+        void RememberManual() {
+            appliedUpgrade = AllowUpgrade;
+            appliedManual.Clear();
+            if (ManualTranslations == null) return;
+            foreach (string id in ManualTranslations) appliedManual.Add(id);
+        }
+
+        bool SameManual() {
+            HashSet<string> next = ManualTranslations;
+            int count = next == null ? 0 : next.Count;
+            if (count != appliedManual.Count) return false;
+            if (next == null) return true;
+            foreach (string id in next) if (!appliedManual.Contains(id)) return false;
+            return true;
         }
 
         bool SameMessages(IReadOnlyList<ChatMessage> next) {

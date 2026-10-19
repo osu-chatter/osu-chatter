@@ -111,5 +111,57 @@ namespace Chatter.Tests {
                 Check(restartedWorker.WaitForExit(5000), "worker survives app disposal");
             }
         }
+        public static void RoundedControls() {
+            Color sidebar = Color.FromArgb(18, 20, 26);
+            Color page = Color.FromArgb(12, 13, 16);
+            using (var host = new Panel { BackColor = sidebar, Size = new Size(420, 120) }) {
+                var pill = Chrome("PillButton", new Size(200, 36));
+                pill.GetType().GetProperty("Caption").SetValue(pill, "Translation preferences…", null);
+                var filled = Chrome("PillButton", new Size(88, 34));
+                filled.GetType().GetProperty("Filled").SetValue(filled, true, null);
+                filled.GetType().GetProperty("Caption").SetValue(filled, "Send", null);
+                var toggle = Chrome("SwitchBox", new Size(40, 22));
+                var field = Chrome("LineField", new Size(180, 40));
+                host.Controls.Add(pill);
+                host.Controls.Add(filled);
+                host.Controls.Add(toggle);
+                host.Controls.Add(field);
+                ExpectCorners(host, pill, "pill");
+                ExpectCorners(host, toggle, "switch");
+                ExpectCorners(host, field, "field");
+                Color face = Paint(pill).GetPixel(16, pill.Height / 2);
+                Check(Same(face, Color.FromArgb(30, 34, 43)), "pill face " + face);
+                Color send = Paint(filled).GetPixel(14, filled.Height / 2);
+                Check(Same(send, Color.FromArgb(225, 29, 72)), "filled face " + send);
+                Color box = Paint(field).GetPixel(field.Width / 2, field.Height / 2);
+                Check(Same(box, Color.FromArgb(30, 34, 43)), "field face " + box);
+                host.BackColor = page;
+                ExpectCorners(host, pill, "pill on page");
+                ExpectCorners(host, filled, "filled on page");
+            }
+        }
+        static Control Chrome(string name, Size size) {
+            var type = typeof(MainForm).Assembly.GetType("Chatter.App." + name, true);
+            var control = (Control)Activator.CreateInstance(type, true);
+            control.Size = size;
+            return control;
+        }
+        static void ExpectCorners(Control host, Control control, string name) {
+            using (var bitmap = Paint(control)) {
+                foreach (var point in new[] { new Point(0, 0), new Point(control.Width - 1, 0), new Point(0, control.Height - 1), new Point(2, 2) }) {
+                    Color pixel = bitmap.GetPixel(point.X, point.Y);
+                    Check(Same(pixel, host.BackColor), name + " corner " + point + " is " + pixel);
+                }
+            }
+        }
+        static Bitmap Paint(Control control) {
+            var bitmap = new Bitmap(control.Width, control.Height);
+            using (var graphics = Graphics.FromImage(bitmap)) {
+                var args = new PaintEventArgs(graphics, new Rectangle(Point.Empty, control.Size));
+                control.GetType().GetMethod("OnPaint", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(control, new object[] { args });
+            }
+            return bitmap;
+        }
+        static bool Same(Color left, Color right) => left.R == right.R && left.G == right.G && left.B == right.B;
     }
 }

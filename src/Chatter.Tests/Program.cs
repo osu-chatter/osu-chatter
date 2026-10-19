@@ -41,6 +41,7 @@ namespace Chatter.Tests {
         static void RunInterfaceChecks() {
             Run("transcript keeps its place", UiTests.Transcript);
             Run("conversation refresh keeps selection", UiTests.Refresh);
+            Run("rounded controls match their parent", UiTests.RoundedControls);
         }
 
         static void RunChatReadChecks() {

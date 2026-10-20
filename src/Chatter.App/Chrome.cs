@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
+using Chatter;
 
 namespace Chatter.App {
     static class Palette {
@@ -80,9 +81,17 @@ namespace Chatter.App {
                 graphics.DrawPath(pen, path);
         }
 
+        public static TextFormatFlags Direction(string text) {
+            return ChatRules.RightToLeftText(text) ? Wrap | TextFormatFlags.RightToLeft | TextFormatFlags.Right : Wrap;
+        }
+
         public static Size Measure(string text, Font font, int width) {
+            return Measure(text, font, width, Wrap);
+        }
+
+        public static Size Measure(string text, Font font, int width, TextFormatFlags flags) {
             if (string.IsNullOrEmpty(text)) return new Size(0, 0);
-            return TextRenderer.MeasureText(text, font, new Size(Math.Max(1, width), int.MaxValue), Wrap);
+            return TextRenderer.MeasureText(text, font, new Size(Math.Max(1, width), int.MaxValue), flags);
         }
     }
 

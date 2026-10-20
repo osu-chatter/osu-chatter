@@ -74,11 +74,27 @@ namespace Chatter {
         public const string LocalTranslator = "local";
 
         public static readonly string[] Languages = {
-            "en", "pl", "ru", "ko", "ja", "zh", "de", "fr", "es", "pt", "uk"
+            "en", "pl", "ru", "ko", "ja", "zh", "de", "fr", "es", "pt", "uk", "he", "ar", "tr"
         };
         public static readonly string[] LanguageNames = {
-            "English", "Polish", "Russian", "Korean", "Japanese", "Chinese", "German", "French", "Spanish", "Portuguese", "Ukrainian"
+            "English", "Polish", "Russian", "Korean", "Japanese", "Chinese", "German", "French", "Spanish", "Portuguese", "Ukrainian", "Hebrew", "Arabic", "Turkish"
         };
+
+        public static bool RightToLeft(string id) {
+            return id == "he" || id == "ar";
+        }
+
+        public static bool RightToLeftText(string text) {
+            if (string.IsNullOrEmpty(text)) return false;
+            for (int i = 0; i < text.Length; i++) {
+                char c = text[i];
+                if (c >= '\u0590' && c <= '\u08FF') return true;
+                if (c >= '\uFB1D' && c <= '\uFB4F') return true;
+                if (c >= '\uFB50' && c <= '\uFDFF') return true;
+                if (c >= '\uFE70' && c <= '\uFEFF') return true;
+            }
+            return false;
+        }
 
         public static bool MenuOrLobby(int state) {
             return StableCompatibilityProfile.MenuOrLobby(state);
@@ -93,6 +109,9 @@ namespace Chatter {
             if (System.Text.RegularExpressions.Regex.IsMatch(name, @"russian|(^|\W)ru($|\W)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return "ru";
             if (System.Text.RegularExpressions.Regex.IsMatch(name, @"korean|(^|\W)ko($|\W)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return "ko";
             if (System.Text.RegularExpressions.Regex.IsMatch(name, @"polish|(^|\W)pl($|\W)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return "pl";
+            if (System.Text.RegularExpressions.Regex.IsMatch(name, @"hebrew|(^|\W)he($|\W)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return "he";
+            if (System.Text.RegularExpressions.Regex.IsMatch(name, @"arabic|(^|\W)arab($|\W)|(^|\W)ar($|\W)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return "ar";
+            if (System.Text.RegularExpressions.Regex.IsMatch(name, @"turkish|(^|\W)tr($|\W)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return "tr";
             return "en";
         }
 

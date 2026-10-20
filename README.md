@@ -48,7 +48,7 @@ You can keep two providers at once. The automatic provider translates new messag
 
 Each conversation remembers the incoming language, the outgoing language, and whether auto-translate is on. Those choices are saved with your other settings. A conversation you have not customized follows the defaults from translation preferences.
 
-Local translation supports English, Polish, Russian, Korean, Japanese, Chinese, German, French, Spanish, Portuguese, and Ukrainian. Other language pairs translate through English. Results can vary, especially for short messages.
+Local translation supports English, Polish, Russian, Korean, Japanese, Chinese, German, French, Spanish, Portuguese, Ukrainian, Hebrew, Arabic, and Turkish. Other language pairs translate through English. Results can vary, especially for short messages. Hebrew and Arabic are shown right to left.
 
 ## Chat and privacy
 

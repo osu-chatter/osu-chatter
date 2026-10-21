@@ -483,6 +483,19 @@ namespace Chatter.App {
             incomingButton.Enabled = selected.Length > 0;
             auto.Enabled = selected.Length > 0;
             languageButton.Caption = LanguageLabel(OutgoingLanguage());
+            ApplyWritingDirection();
+        }
+
+        void ApplyWritingDirection() {
+            bool rtl = ChatRules.RightToLeft(OutgoingLanguage());
+            RightToLeft direction = rtl ? RightToLeft.Yes : RightToLeft.No;
+            if (draft.Input.RightToLeft != direction) {
+                draft.Input.RightToLeft = direction;
+                draft.Cue("Write in English");
+            }
+            ContentAlignment align = rtl ? ContentAlignment.MiddleRight : ContentAlignment.TopLeft;
+            if (preview.RightToLeft != direction) preview.RightToLeft = direction;
+            if (preview.TextAlign != align) preview.TextAlign = align;
         }
 
         ChatChannel Current() {
@@ -581,6 +594,7 @@ namespace Chatter.App {
             if (selected.Length == 0) return;
             StoreFor(selected, entry => entry.OutgoingLanguage = id);
             languageButton.Caption = LanguageLabel(id);
+            ApplyWritingDirection();
             if (preview.Visible) { preview.Visible = false; LayoutChrome(); }
         }
 
@@ -953,9 +967,16 @@ namespace Chatter.App {
             chosen = onChoice;
             int height = 12 + stack.Controls.Count * 30;
             var screenBounds = Screen.FromPoint(screen).WorkingArea;
+            int limit = Math.Max(180, screenBounds.Height - 16);
+            if (height > limit) {
+                height = limit;
+                stack.AutoScroll = true;
+                Width = 196;
+            }
             if (screen.Y + height > screenBounds.Bottom) screen.Y -= height + 40;
+            if (screen.Y < screenBounds.Top) screen.Y = screenBounds.Top;
             Location = screen;
-            Size = new Size(180, height);
+            Size = new Size(Width, height);
             Show(owner);
         }
     }

@@ -71,6 +71,7 @@ namespace Chatter.Tests {
                 }
             }
             Check(Translator.DeepLLanguage("pt", true) == "PT-PT" && Translator.DeepLLanguage("en", false) == "EN" && Translator.DeepLLanguage("ko", true) == "KO", "language codes");
+            Check(Translator.DeepLLanguage("he", true) == "HE" && Translator.DeepLLanguage("ar", false) == "AR" && Translator.DeepLLanguage("tr", true) == "TR", "hebrew arabic turkish codes");
             foreach (var invalid in new[] { "null", "{}", "{\"translations\":[]}", "{\"translations\":[{\"text\":null}]}" })
                 Check(Translator.DeepLText(invalid) == null, "invalid response accepted");
             foreach (string key in new[] { "", "  ", "bad\r\nkey" }) {
@@ -224,6 +225,13 @@ namespace Chatter.Tests {
                 Check(stored != null && stored.IncomingLanguage == "de" && stored.OutgoingLanguage == "ko" && stored.AutoTranslate == false, "channel record");
                 var original = ((AppPreferences)Get(main, "preferences")).FindChannel("#osu");
                 Check(original != null && original.IncomingLanguage == "pl" && original.OutgoingLanguage == "ja" && original.AutoTranslate == false, "other channel record");
+                Invoke(main, "Select", "#hebrew");
+                var input = (TextBox)Get(Get(main, "draft"), "Input");
+                Check(Caption(main, "languageButton") == "Hebrew" && input.RightToLeft == RightToLeft.Yes, "hebrew writing direction");
+                Invoke(main, "SetOutgoing", "tr");
+                Check(Caption(main, "languageButton") == "Turkish" && input.RightToLeft == RightToLeft.No, "turkish writing direction");
+                Invoke(main, "SetOutgoing", "ar");
+                Check(Caption(main, "languageButton") == "Arabic" && input.RightToLeft == RightToLeft.Yes, "arabic writing direction");
             }
         }
         static string Caption(object main, string field) {

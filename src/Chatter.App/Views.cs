@@ -220,11 +220,13 @@ namespace Chatter.App {
                 bool hasTranslation = !string.IsNullOrEmpty(translated) && translated != message.Text;
                 string error;
                 errors.TryGetValue(message.Id, out error);
-                var body = PaintKit.Measure(message.Text, UiFont.Message, maxText);
+                TextFormatFlags bodyFlags = PaintKit.Direction(message.Text);
+                TextFormatFlags translationFlags = hasTranslation ? PaintKit.Direction(translated) : PaintKit.Wrap;
+                var body = PaintKit.Measure(message.Text, UiFont.Message, maxText, bodyFlags);
                 Size translationSize = Size.Empty;
                 Size errorSize = Size.Empty;
                 if (hasTranslation) {
-                    translationSize = PaintKit.Measure(translated, UiFont.Body, maxText);
+                    translationSize = PaintKit.Measure(translated, UiFont.Body, maxText, translationFlags);
                 }
                 if (!string.IsNullOrEmpty(error)) {
                     errorSize = PaintKit.Measure(error, UiFont.Small, maxText);
@@ -238,9 +240,9 @@ namespace Chatter.App {
                 bubbleWidth = Math.Max(bubbleWidth, errorSize.Width);
                 bubbleWidth = Math.Min(maxText, Math.Max(link ? (hasTranslation ? 156 : 128) : 96, bubbleWidth)) + 28;
                 int textWidth = bubbleWidth - 28;
-                body = PaintKit.Measure(message.Text, UiFont.Message, textWidth);
+                body = PaintKit.Measure(message.Text, UiFont.Message, textWidth, bodyFlags);
                 int extra = 26;
-                if (hasTranslation) extra += PaintKit.Measure(translated, UiFont.Body, textWidth).Height + 12;
+                if (hasTranslation) extra += PaintKit.Measure(translated, UiFont.Body, textWidth, translationFlags).Height + 12;
                 if (!string.IsNullOrEmpty(error)) extra += PaintKit.Measure(error, UiFont.Small, textWidth).Height + 8;
                 if (link && !string.IsNullOrEmpty(error)) extra += 16;
                 int bubbleHeight = 12 + body.Height + extra;
@@ -250,7 +252,7 @@ namespace Chatter.App {
                 block.Bubble = new Rectangle(x, y, bubbleWidth, bubbleHeight);
                 block.ShowAvatar = !grouped;
                 block.Avatar = new Rectangle(message.Outgoing ? x + bubbleWidth + AvatarGap : Side, block.ShowSender ? -20 : 0, AvatarSize, AvatarSize);
-                block.Links = LayoutLinks(measure, message.Text, ChatLinks.Find(message.Text, message.Source), textWidth);
+                block.Links = LayoutLinks(measure, message.Text, ChatLinks.Find(message.Text, message.Source), textWidth, bodyFlags);
                 block.HasTranslate = link;
                 block.LinkCaption = linkCaption;
                 if (link) block.Translate = new Rectangle(x + 14, y + bubbleHeight - 22, linkWidth, 18);
@@ -315,7 +317,7 @@ namespace Chatter.App {
                 PaintKit.StrokeRound(g, bubble, 10, message.Outgoing ? Color.FromArgb(103, 45, 65) : Color.FromArgb(40, 46, 57));
                 int textWidth = bubble.Width - 28;
                 var bodyRect = new Rectangle(bubble.X + 14, bubble.Y + 10, textWidth, bubble.Height - 20);
-                TextRenderer.DrawText(g, message.Text, UiFont.Message, bodyRect, Palette.Ink, PaintKit.Wrap);
+                TextRenderer.DrawText(g, message.Text, UiFont.Message, bodyRect, Palette.Ink, PaintKit.Direction(message.Text));
                 DrawLinkLines(g, block, bodyRect);
                 var bodySize = PaintKit.Measure(message.Text, UiFont.Message, textWidth);
                 int cursor = bodyRect.Y + bodySize.Height + 8;
@@ -325,7 +327,7 @@ namespace Chatter.App {
                         g.DrawLine(pen, bubble.X + 14, cursor, bubble.Right - 14, cursor);
                     cursor += 6;
                     var translationSize = PaintKit.Measure(translated, UiFont.Body, textWidth);
-                    TextRenderer.DrawText(g, translated, UiFont.Body, new Rectangle(bubble.X + 14, cursor, textWidth, translationSize.Height + 2), Color.FromArgb(214, 219, 228), PaintKit.Wrap);
+                    TextRenderer.DrawText(g, translated, UiFont.Body, new Rectangle(bubble.X + 14, cursor, textWidth, translationSize.Height + 2), Color.FromArgb(214, 219, 228), PaintKit.Direction(translated));
                     cursor += translationSize.Height + 6;
                 }
                 string error;
@@ -588,12 +590,13 @@ namespace Chatter.App {
 
         // MeasureText on .NET Framework adds glyph padding that DrawText does not draw.
         // GDI advances of the same line match the glyphs in the bubble, so the underline sits on the link.
-        static List<TextLink> LayoutLinks(LineMeasure measure, string text, List<ChatLinks.Span> spans, int width) {
+        static List<TextLink> LayoutLinks(LineMeasure measure, string text, List<ChatLinks.Span> spans, int width, TextFormatFlags flags) {
             var links = new List<TextLink>();
             if (measure == null || spans == null || spans.Count == 0 || string.IsNullOrEmpty(text) || width <= 0) return links;
+            bool rightToLeft = (flags & TextFormatFlags.RightToLeft) != 0;
             int lineHeight = measure.LineHeight;
             if (lineHeight < 1) lineHeight = UiFont.Message.Height;
-            int limit = PaintKit.Measure(text, UiFont.Message, width).Height;
+            int limit = PaintKit.Measure(text, UiFont.Message, width, flags).Height;
             if (limit < lineHeight) limit = lineHeight;
             int y = 0;
             int index = 0;
@@ -601,7 +604,7 @@ namespace Chatter.App {
                 if (text[index] == '\r') { index++; continue; }
                 if (text[index] == '\n') { y += lineHeight; index++; continue; }
                 int end = TakeLine(measure, text, index, width);
-                PlaceLine(measure, text, spans, links, index, end, y, lineHeight);
+                PlaceLine(measure, text, spans, links, index, end, y, lineHeight, width, rightToLeft);
                 y += lineHeight;
                 if (end < text.Length && text[end] == ' ') end++;
                 index = end;
@@ -633,7 +636,7 @@ namespace Chatter.App {
             return index;
         }
 
-        static void PlaceLine(LineMeasure measure, string text, List<ChatLinks.Span> spans, List<TextLink> links, int start, int end, int y, int lineHeight) {
+        static void PlaceLine(LineMeasure measure, string text, List<ChatLinks.Span> spans, List<TextLink> links, int start, int end, int y, int lineHeight, int width, bool rightToLeft) {
             if (end <= start) return;
             for (int i = 0; i < spans.Count; i++) {
                 ChatLinks.Span span = spans[i];
@@ -643,6 +646,12 @@ namespace Chatter.App {
                 int left = from == start ? 0 : measure.Advance(text.Substring(start, from - start));
                 int right = measure.Advance(text.Substring(start, to - start));
                 if (right <= left) right = left + 1;
+                if (rightToLeft) {
+                    int visualLeft = Math.Max(0, width - right);
+                    int visualRight = Math.Max(visualLeft + 1, width - left);
+                    left = visualLeft;
+                    right = visualRight;
+                }
                 links.Add(new TextLink { Bounds = new Rectangle(left, y, right - left, lineHeight), Url = span.Url });
             }
         }

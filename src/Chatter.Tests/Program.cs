@@ -385,9 +385,20 @@ namespace Chatter.Tests {
         }
 
         public static void Language() {
+            if (ChatRules.Languages.Length != ChatRules.LanguageNames.Length) throw new InvalidOperationException("language list");
+            if (Array.IndexOf(ChatRules.Languages, "he") < 0 || Array.IndexOf(ChatRules.Languages, "ar") < 0 || Array.IndexOf(ChatRules.Languages, "tr") < 0)
+                throw new InvalidOperationException("missing language");
             if (ChatRules.ChannelLanguage("#russian") != "ru" || ChatRules.ChannelLanguage("ko-chat") != "ko" || ChatRules.ChannelLanguage("#polish") != "pl")
                 throw new InvalidOperationException("named");
+            if (ChatRules.ChannelLanguage("#hebrew") != "he" || ChatRules.ChannelLanguage("#arab") != "ar" || ChatRules.ChannelLanguage("#turkish") != "tr")
+                throw new InvalidOperationException("named");
             if (ChatRules.ChannelLanguage("#osu") != "en" || ChatRules.ChannelLanguage("certual") != "en") throw new InvalidOperationException("default");
+            if (ChatRules.ChannelLanguage("heart") != "en" || ChatRules.ChannelLanguage("arcade") != "en" || ChatRules.ChannelLanguage("intro") != "en")
+                throw new InvalidOperationException("default");
+            if (!ChatRules.RightToLeft("he") || !ChatRules.RightToLeft("ar") || ChatRules.RightToLeft("tr") || ChatRules.RightToLeft("en"))
+                throw new InvalidOperationException("direction");
+            if (!ChatRules.RightToLeftText("שלום") || !ChatRules.RightToLeftText("مرحبا") || ChatRules.RightToLeftText("merhaba") || ChatRules.RightToLeftText("Hello"))
+                throw new InvalidOperationException("script");
         }
     }
 

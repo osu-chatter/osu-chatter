@@ -25,7 +25,12 @@ namespace Chatter.App {
         readonly LineField draft = new LineField();
         readonly PillButton send = new PillButton { Filled = true, Caption = "Send" };
         readonly PillButton previewButton = new PillButton { Caption = "Preview" };
-        readonly PillButton languageButton = new PillButton { Caption = "English" };
+        readonly PillButton fromButton = new PillButton { Caption = "English", OpensMenu = true };
+        readonly SwapButton swapButton = new SwapButton();
+        readonly PillButton languageButton = new PillButton { Caption = "English", OpensMenu = true };
+        readonly Label fromCaption = LanguageCaption("From");
+        readonly Label toCaption = LanguageCaption("To");
+        readonly ToolTip tips = new ToolTip();
         readonly Label preview = new Label();
         readonly Panel composer = new Panel();
         readonly Panel settings = new Panel();
@@ -57,6 +62,7 @@ namespace Chatter.App {
         int translationGeneration;
         bool suppress;
         string viewSignature = "";
+        string draftCue = "";
 
         public bool DemoMode { get; set; }
 
@@ -98,7 +104,6 @@ namespace Chatter.App {
 
         protected override void OnShown(EventArgs e) {
             base.OnShown(e);
-            draft.Cue("Write in English");
             if (!DemoMode) {
                 ApplyPreferences();
                 reading = preferences.StartReading;
@@ -119,6 +124,7 @@ namespace Chatter.App {
             translationGeneration++;
             service.Dispose();
             profiles.Dispose();
+            tips.Dispose();
             base.OnFormClosed(e);
         }
 
@@ -161,6 +167,10 @@ namespace Chatter.App {
             preview.Visible = false;
             composer.Controls.Add(preview);
             composer.Controls.Add(draft);
+            composer.Controls.Add(fromCaption);
+            composer.Controls.Add(toCaption);
+            composer.Controls.Add(fromButton);
+            composer.Controls.Add(swapButton);
             composer.Controls.Add(languageButton);
             composer.Controls.Add(previewButton);
             composer.Controls.Add(send);
@@ -169,7 +179,12 @@ namespace Chatter.App {
                 if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; TranslateAndSend(); }
             };
             draft.Input.TextChanged += delegate { if (!suppress) RememberDraft(); RefreshActions(); };
-            languageButton.Click += delegate { PickLanguage(languageButton, false); };
+            fromButton.Click += delegate { PickLanguage(fromButton, LanguagePick.Source); };
+            swapButton.Click += delegate { SwapLanguages(); };
+            languageButton.Click += delegate { PickLanguage(languageButton, LanguagePick.Outgoing); };
+            tips.SetToolTip(fromButton, "Language to translate from");
+            tips.SetToolTip(swapButton, "Swap languages");
+            tips.SetToolTip(languageButton, "Language to translate to");
             previewButton.Click += delegate { PreviewDraft(); };
             send.Click += delegate { TranslateAndSend(); };
             Controls.Add(composer);
@@ -182,7 +197,7 @@ namespace Chatter.App {
             settings.BackColor = Palette.Sidebar;
             settings.Visible = false;
             closeSettings.Click += delegate { settingsOpen = false; LayoutChrome(); };
-            incomingButton.Click += delegate { PickLanguage(incomingButton, true); };
+            incomingButton.Click += delegate { PickLanguage(incomingButton, LanguagePick.Incoming); };
             auto.Toggled += delegate {
                 if (suppress || selected.Length == 0) return;
                 StoreFor(selected, entry => entry.AutoTranslate = auto.On);
@@ -224,7 +239,7 @@ namespace Chatter.App {
                 banner.SetBounds(mainX, top, contentW, 44);
                 top += 44;
             }
-            int composerH = preview.Visible ? 156 : 124;
+            int composerH = ComposerHeight();
             composer.SetBounds(mainX, ClientSize.Height - composerH, contentW, composerH);
             LayoutComposer();
             transcript.SetBounds(mainX, top, contentW, Math.Max(80, ClientSize.Height - composerH - top));
@@ -233,18 +248,37 @@ namespace Chatter.App {
             settingsButton.BringToFront();
         }
 
+        int ComposerHeight() => (preview.Visible ? 36 : 12) + 108;
+
         void LayoutComposer() {
             int width = composer.Width;
-            int y = 14;
-            preview.SetBounds(20, 10, Math.Max(40, width - 40), 22);
-            if (preview.Visible) y = 38;
-            draft.SetBounds(16, y, Math.Max(80, width - 32), 42);
-            y += 52;
-            int right = width - 16;
-            send.SetBounds(right - 76, y, 76, 34);
-            previewButton.SetBounds(send.Left - 92, y, 84, 34);
-            languageButton.SetBounds(previewButton.Left - 116, y, 108, 34);
+            int draftY = preview.Visible ? 36 : 12;
+            int captionY = draftY + 46;
+            int buttonY = captionY + 16;
+            preview.SetBounds(20, 8, Math.Max(40, width - 40), 22);
+            draft.SetBounds(16, draftY, Math.Max(80, width - 32), 42);
+            const int margin = 16;
+            const int gap = 8;
+            const int sendW = 76;
+            const int previewW = 84;
+            const int swapW = 34;
+            const int buttonH = 34;
+            int right = width - margin;
+            send.SetBounds(right - sendW, buttonY, sendW, buttonH);
+            previewButton.SetBounds(send.Left - gap - previewW, buttonY, previewW, buttonH);
+            int available = Math.Max(0, previewButton.Left - gap - margin);
+            int buttonW = Math.Min(156, Math.Max(0, (available - swapW - gap * 2) / 2));
+            int pairLeft = previewButton.Left - gap - (buttonW * 2 + swapW + gap * 2);
+            fromButton.SetBounds(pairLeft, buttonY, buttonW, buttonH);
+            swapButton.SetBounds(fromButton.Right + gap, buttonY, swapW, buttonH);
+            languageButton.SetBounds(swapButton.Right + gap, buttonY, buttonW, buttonH);
+            fromCaption.SetBounds(fromButton.Left, captionY, buttonW, 16);
+            toCaption.SetBounds(languageButton.Left, captionY, buttonW, 16);
         }
+
+        static Label LanguageCaption(string text) => new Label {
+            Text = text, AutoSize = false, ForeColor = Palette.Muted, BackColor = Palette.Bg, Font = UiFont.Small, TextAlign = ContentAlignment.BottomLeft
+        };
 
         void LayoutSettings(int width) {
             closeSettings.SetBounds(width - 92, 18, 76, 32);
@@ -480,21 +514,31 @@ namespace Chatter.App {
             check.Enabled = !busy && channel != null && live;
             preferencesButton.Enabled = !busy && !preparingTranslator;
             draft.Input.Enabled = channel != null;
-            incomingButton.Enabled = selected.Length > 0;
-            auto.Enabled = selected.Length > 0;
+            bool ready = selected.Length > 0;
+            incomingButton.Enabled = ready;
+            auto.Enabled = ready;
+            fromButton.Enabled = ready;
+            swapButton.Enabled = ready;
+            languageButton.Enabled = ready;
+            fromButton.Caption = LanguageLabel(OutgoingSource());
             languageButton.Caption = LanguageLabel(OutgoingLanguage());
             ApplyWritingDirection();
         }
 
         void ApplyWritingDirection() {
-            bool rtl = ChatRules.RightToLeft(OutgoingLanguage());
-            RightToLeft direction = rtl ? RightToLeft.Yes : RightToLeft.No;
-            if (draft.Input.RightToLeft != direction) {
-                draft.Input.RightToLeft = direction;
-                draft.Cue("Write in English");
+            bool writeRightToLeft = ChatRules.RightToLeft(OutgoingSource());
+            RightToLeft writing = writeRightToLeft ? RightToLeft.Yes : RightToLeft.No;
+            bool directionChanged = draft.Input.RightToLeft != writing;
+            if (directionChanged) draft.Input.RightToLeft = writing;
+            string cue = "Write in " + LanguageLabel(OutgoingSource());
+            if (directionChanged || draftCue != cue) {
+                draftCue = cue;
+                draft.Cue(cue);
             }
-            ContentAlignment align = rtl ? ContentAlignment.MiddleRight : ContentAlignment.TopLeft;
-            if (preview.RightToLeft != direction) preview.RightToLeft = direction;
+            bool sendRightToLeft = ChatRules.RightToLeft(OutgoingLanguage());
+            RightToLeft sent = sendRightToLeft ? RightToLeft.Yes : RightToLeft.No;
+            ContentAlignment align = sendRightToLeft ? ContentAlignment.MiddleRight : ContentAlignment.TopLeft;
+            if (preview.RightToLeft != sent) preview.RightToLeft = sent;
             if (preview.TextAlign != align) preview.TextAlign = align;
         }
 
@@ -534,11 +578,17 @@ namespace Chatter.App {
         void LoadChannelSettings() {
             suppress = true;
             incomingButton.Caption = LanguageLabel(IncomingLanguage());
+            fromButton.Caption = LanguageLabel(OutgoingSource());
+            languageButton.Caption = LanguageLabel(OutgoingLanguage());
             ChannelPreference channel = preferences.FindChannel(selected);
             auto.On = channel != null && channel.AutoTranslate.HasValue ? channel.AutoTranslate.Value : preferences.AutoTranslateIncoming;
             bool ready = selected.Length > 0;
             incomingButton.Enabled = ready;
             auto.Enabled = ready;
+            fromButton.Enabled = ready;
+            swapButton.Enabled = ready;
+            languageButton.Enabled = ready;
+            ApplyWritingDirection();
             suppress = false;
         }
 
@@ -554,13 +604,20 @@ namespace Chatter.App {
             return preferences.OutgoingLanguage == "channel" ? ChatRules.ChannelLanguage(selected) : preferences.OutgoingLanguage;
         }
 
-        void StoreFor(string name, Action<ChannelPreference> edit) {
-            if (string.IsNullOrEmpty(name)) return;
+        string OutgoingSource() {
+            ChannelPreference channel = preferences.FindChannel(selected);
+            if (channel != null && channel.OutgoingSource.Length > 0) return channel.OutgoingSource;
+            return string.IsNullOrEmpty(preferences.OutgoingSource) ? "en" : preferences.OutgoingSource;
+        }
+
+        bool StoreFor(string name, Action<ChannelPreference> edit) {
+            if (string.IsNullOrEmpty(name)) return false;
             ChannelPreference current = preferences.FindChannel(name);
             var entry = current == null ? new ChannelPreference { Name = name } : current.Copy();
             edit(entry);
-            if (!preferences.Remember(entry)) return;
+            if (!preferences.Remember(entry)) return false;
             SavePreferences();
+            return true;
         }
 
         static string LanguageLabel(string id) {
@@ -568,13 +625,17 @@ namespace Chatter.App {
             return "English";
         }
 
-        void PickLanguage(PillButton source, bool incoming) {
+        enum LanguagePick { Incoming, Outgoing, Source }
+
+        void PickLanguage(PillButton source, LanguagePick pick) {
+            string current = pick == LanguagePick.Incoming ? IncomingLanguage() : pick == LanguagePick.Source ? OutgoingSource() : OutgoingLanguage();
             var menu = new LanguageMenu();
             for (int i = 0; i < ChatRules.Languages.Length; i++)
-                menu.Add(ChatRules.Languages[i], ChatRules.LanguageNames[i], (incoming ? IncomingLanguage() : OutgoingLanguage()) == ChatRules.Languages[i]);
+                menu.Add(ChatRules.Languages[i], ChatRules.LanguageNames[i], current == ChatRules.Languages[i]);
             var origin = source.PointToScreen(new Point(0, source.Height + 6));
             menu.ShowAt(this, origin, delegate(string id) {
-                if (incoming) SetIncoming(id);
+                if (pick == LanguagePick.Incoming) SetIncoming(id);
+                else if (pick == LanguagePick.Source) SetOutgoingSource(id);
                 else SetOutgoing(id);
             });
         }
@@ -592,10 +653,36 @@ namespace Chatter.App {
 
         void SetOutgoing(string id) {
             if (selected.Length == 0) return;
-            StoreFor(selected, entry => entry.OutgoingLanguage = id);
+            if (!StoreFor(selected, entry => entry.OutgoingLanguage = id)) return;
             languageButton.Caption = LanguageLabel(id);
             ApplyWritingDirection();
             if (preview.Visible) { preview.Visible = false; LayoutChrome(); }
+        }
+
+        void SetOutgoingSource(string id) {
+            if (selected.Length == 0 || Array.IndexOf(ChatRules.Languages, id) < 0) return;
+            if (!StoreFor(selected, entry => entry.OutgoingSource = id)) return;
+            fromButton.Caption = LanguageLabel(id);
+            ApplyWritingDirection();
+            if (preview.Visible) { preview.Visible = false; LayoutChrome(); }
+        }
+
+        void SwapLanguages() {
+            if (selected.Length == 0) return;
+            string from = OutgoingSource();
+            string to = OutgoingLanguage();
+            if (from == to) return;
+            if (!StoreFor(selected, entry => { entry.OutgoingSource = to; entry.OutgoingLanguage = from; })) return;
+            fromButton.Caption = LanguageLabel(to);
+            languageButton.Caption = LanguageLabel(from);
+            ApplyWritingDirection();
+            if (preview.Visible) { preview.Visible = false; LayoutChrome(); }
+        }
+
+        TranslationRequest DraftRequest(string text) {
+            var request = new TranslationRequest { Text = text, Source = OutgoingSource(), Target = OutgoingLanguage() };
+            preferences.ApplyProvider(request, false);
+            return request;
         }
 
         void ApplyPreferences() {
@@ -779,18 +866,18 @@ namespace Chatter.App {
             notice = "";
             string text = draft.Input.Text;
             string language = OutgoingLanguage();
+            string source = OutgoingSource();
             int generation = translationGeneration;
             string previewChannel = selected;
             RefreshActions();
-            var request = new TranslationRequest { Text = text, Source = "en", Target = language };
-            preferences.ApplyProvider(request, false);
+            var request = DraftRequest(text);
             Task.Run(delegate {
                 try {
                     string translated = service.Translate(request);
                     Post(delegate {
                         busy = false;
                         translatorOffline = false;
-                        if (generation == translationGeneration && selected == previewChannel && draft.Input.Text == text && OutgoingLanguage() == language) {
+                        if (generation == translationGeneration && selected == previewChannel && draft.Input.Text == text && OutgoingLanguage() == language && OutgoingSource() == source) {
                             preview.Text = translated;
                             preview.Visible = true;
                             LayoutChrome();
@@ -820,10 +907,8 @@ namespace Chatter.App {
             notice = "";
             string target = channel.Name;
             string text = draft.Input.Text;
-            string language = OutgoingLanguage();
             RefreshActions();
-            var request = new TranslationRequest { Text = text, Source = "en", Target = language };
-            preferences.ApplyProvider(request, false);
+            var request = DraftRequest(text);
             Task.Run(delegate {
                 try {
                     SendReceipt receipt = service.TranslateAndSend(target, request);

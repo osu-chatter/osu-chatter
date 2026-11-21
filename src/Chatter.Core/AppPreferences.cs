@@ -11,17 +11,20 @@ namespace Chatter {
         public string Name { get; set; } = "";
         public string IncomingLanguage { get; set; } = "";
         public string OutgoingLanguage { get; set; } = "";
+        public string OutgoingSource { get; set; } = "";
         public bool? AutoTranslate { get; set; }
 
         public ChannelPreference Copy() => new ChannelPreference {
-            Name = Name, IncomingLanguage = IncomingLanguage, OutgoingLanguage = OutgoingLanguage, AutoTranslate = AutoTranslate
+            Name = Name, IncomingLanguage = IncomingLanguage, OutgoingLanguage = OutgoingLanguage, OutgoingSource = OutgoingSource, AutoTranslate = AutoTranslate
         };
 
         public bool LanguagesValid() {
             IncomingLanguage = IncomingLanguage ?? "";
             OutgoingLanguage = OutgoingLanguage ?? "";
+            OutgoingSource = OutgoingSource ?? "";
             if (IncomingLanguage.Length > 0 && Array.IndexOf(ChatRules.Languages, IncomingLanguage) < 0) return false;
             if (OutgoingLanguage.Length > 0 && Array.IndexOf(ChatRules.Languages, OutgoingLanguage) < 0) return false;
+            if (OutgoingSource.Length > 0 && Array.IndexOf(ChatRules.Languages, OutgoingSource) < 0) return false;
             return true;
         }
     }
@@ -34,6 +37,7 @@ namespace Chatter {
         public string ManualApiKey { get; set; } = "";
         public string IncomingLanguage { get; set; } = "en";
         public string OutgoingLanguage { get; set; } = "channel";
+        public string OutgoingSource { get; set; } = "en";
         public bool AutoTranslateIncoming { get; set; } = true;
         public bool StartReading { get; set; } = true;
         public List<ChannelPreference> Channels { get; set; } = new List<ChannelPreference>();
@@ -98,6 +102,7 @@ namespace Chatter {
 
         public void Validate() {
             if (Array.IndexOf(ChatRules.Languages, IncomingLanguage) < 0 ||
+                Array.IndexOf(ChatRules.Languages, OutgoingSource) < 0 ||
                 (OutgoingLanguage != "channel" && Array.IndexOf(ChatRules.Languages, OutgoingLanguage) < 0))
                 throw new InvalidOperationException("Choose an incoming and outgoing language.");
             new TranslationRequest { Endpoint = Endpoint, ApiKey = ApiKey, Text = "test", Source = "en", Target = IncomingLanguage }.Validate();
@@ -134,6 +139,7 @@ namespace Chatter {
                     ManualEndpoint = ReadString(values, "manualEndpoint"),
                     ManualApiKey = Unprotect(ReadString(values, "encryptedManualKey")),
                     IncomingLanguage = (string)values["incomingLanguage"], OutgoingLanguage = (string)values["outgoingLanguage"],
+                    OutgoingSource = SourceOrEnglish(ReadString(values, "outgoingSource")),
                     AutoTranslateIncoming = (bool)values["autoTranslateIncoming"], StartReading = (bool)values["startReading"],
                     Channels = ReadChannels(values)
                 };
@@ -156,6 +162,7 @@ namespace Chatter {
                 ["manualEndpoint"] = preferences.ManualEndpoint ?? "",
                 ["encryptedManualKey"] = Protect(manualKey),
                 ["incomingLanguage"] = preferences.IncomingLanguage, ["outgoingLanguage"] = preferences.OutgoingLanguage,
+                ["outgoingSource"] = preferences.OutgoingSource,
                 ["autoTranslateIncoming"] = preferences.AutoTranslateIncoming, ["startReading"] = preferences.StartReading,
                 ["channels"] = WriteChannels(preferences.Channels)
             };
@@ -178,6 +185,8 @@ namespace Chatter {
             return Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(encrypted), Entropy, DataProtectionScope.CurrentUser));
         }
 
+        static string SourceOrEnglish(string value) => string.IsNullOrEmpty(value) ? "en" : value;
+
         static string ReadString(Dictionary<string, object> values, string key) {
             object value;
             if (!values.TryGetValue(key, out value) || value == null) return "";
@@ -193,7 +202,7 @@ namespace Chatter {
             for (int i = 0; i < rows.Count; i++) {
                 var row = rows[i] as Dictionary<string, object>;
                 if (row == null) continue;
-                var channel = new ChannelPreference { Name = ReadString(row, "name"), IncomingLanguage = ReadString(row, "incoming"), OutgoingLanguage = ReadString(row, "outgoing") };
+                var channel = new ChannelPreference { Name = ReadString(row, "name"), IncomingLanguage = ReadString(row, "incoming"), OutgoingLanguage = ReadString(row, "outgoing"), OutgoingSource = ReadString(row, "from") };
                 object auto;
                 if (row.TryGetValue("auto", out auto) && auto is bool) channel.AutoTranslate = (bool)auto;
                 if (!AppPreferences.IsChannelName(channel.Name) || !channel.LanguagesValid()) continue;
@@ -214,6 +223,7 @@ namespace Chatter {
                 var row = new Dictionary<string, object> { ["name"] = channel.Name };
                 if (!string.IsNullOrEmpty(channel.IncomingLanguage)) row["incoming"] = channel.IncomingLanguage;
                 if (!string.IsNullOrEmpty(channel.OutgoingLanguage)) row["outgoing"] = channel.OutgoingLanguage;
+                if (!string.IsNullOrEmpty(channel.OutgoingSource)) row["from"] = channel.OutgoingSource;
                 if (channel.AutoTranslate.HasValue) row["auto"] = channel.AutoTranslate.Value;
                 rows.Add(row);
             }

@@ -99,6 +99,7 @@ namespace Chatter.App {
         bool hover;
         string caption = "";
         public bool Filled { get; set; }
+        public bool OpensMenu { get; set; }
 
         public string Caption {
             get { return caption; }
@@ -120,7 +121,15 @@ namespace Chatter.App {
             Color text = !Enabled ? Palette.Faint : Filled ? Color.White : Palette.Ink;
             PaintKit.FillRound(e.Graphics, rect, Height / 2, fill);
             if (!Filled) PaintKit.StrokeRound(e.Graphics, rect, Height / 2, Palette.Line);
-            TextRenderer.DrawText(e.Graphics, caption, Font, rect, text, PaintKit.Single | TextFormatFlags.HorizontalCenter);
+            var textRect = rect;
+            if (OpensMenu) textRect.Width = Math.Max(0, textRect.Width - 14);
+            TextRenderer.DrawText(e.Graphics, caption, Font, textRect, text, PaintKit.Single | TextFormatFlags.HorizontalCenter);
+            if (!OpensMenu) return;
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var pen = new Pen(text, 1.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) {
+                int x = Width - 15, y = Height / 2;
+                e.Graphics.DrawLines(pen, new[] { new Point(x - 3, y - 2), new Point(x, y + 1), new Point(x + 3, y - 2) });
+            }
         }
 
         protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
@@ -158,6 +167,71 @@ namespace Chatter.App {
         protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
         protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
         protected override void OnClick(EventArgs e) { on = !on; Invalidate(); if (Toggled != null) Toggled(this, EventArgs.Empty); base.OnClick(e); }
+    }
+
+    sealed class SwapButton : Control {
+        readonly Timer timer = new Timer { Interval = 15 };
+        bool hover;
+        float spin;
+
+        public SwapButton() {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            Cursor = Cursors.Hand;
+            Size = new Size(34, 34);
+            BackColor = Palette.Bg;
+            AccessibleName = "Swap languages";
+            timer.Tick += Step;
+        }
+
+        protected override void Dispose(bool disposing) {
+            if (disposing) timer.Dispose();
+            base.Dispose(disposing);
+        }
+
+        protected override void OnPaint(PaintEventArgs e) {
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            PaintKit.ClearBehind(g, this);
+            var rect = new Rectangle(0, 0, Width - 1, Height - 1);
+            Color fill = !Enabled ? Palette.Field : hover ? Color.FromArgb(36, 40, 50) : Palette.Field;
+            Color ink = !Enabled ? Palette.Faint : hover ? Palette.Ink : Palette.Muted;
+            Color line = !Enabled ? Palette.Line : hover ? Palette.Accent : Palette.Line;
+            PaintKit.FillRound(g, rect, Height / 2, fill);
+            PaintKit.StrokeRound(g, rect, Height / 2, line);
+            float scale = Math.Min(Width, Height) / 34f;
+            if (scale <= 0f) return;
+            var state = g.Save();
+            g.TranslateTransform(Width / 2f, Height / 2f);
+            if (spin != 0) g.RotateTransform(spin);
+            if (scale != 1f) g.ScaleTransform(scale, scale);
+            g.TranslateTransform(-17f, -17f);
+            DrawArrow(g, ink, 8, 12, 26);
+            DrawArrow(g, ink, 26, 22, 8);
+            g.Restore(state);
+        }
+
+        static void DrawArrow(Graphics g, Color color, float tail, float y, float tip) {
+            float dir = tip > tail ? 1f : -1f;
+            using (var pen = new Pen(color, 1.75f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                g.DrawLine(pen, tail, y, tip - dir * 4.5f, y);
+            using (var brush = new SolidBrush(color))
+                g.FillPolygon(brush, new[] {
+                    new PointF(tip, y),
+                    new PointF(tip - dir * 5.5f, y - 3.4f),
+                    new PointF(tip - dir * 5.5f, y + 3.4f)
+                });
+        }
+
+        void Step(object sender, EventArgs e) {
+            spin += 20f;
+            if (spin >= 180f) { spin = 0; timer.Stop(); }
+            Invalidate();
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
+        protected override void OnClick(EventArgs e) { spin = 0; timer.Start(); base.OnClick(e); }
     }
 
     sealed class LineField : Panel {

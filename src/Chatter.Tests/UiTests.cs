@@ -292,13 +292,18 @@ namespace Chatter.Tests {
                 filled.GetType().GetProperty("Caption").SetValue(filled, "Send", null);
                 var toggle = Chrome("SwitchBox", new Size(40, 22));
                 var field = Chrome("LineField", new Size(180, 40));
+                var swap = Chrome("SwapButton", new Size(34, 34));
                 host.Controls.Add(pill);
                 host.Controls.Add(filled);
                 host.Controls.Add(toggle);
                 host.Controls.Add(field);
+                host.Controls.Add(swap);
                 ExpectCorners(host, pill, "pill");
                 ExpectCorners(host, toggle, "switch");
                 ExpectCorners(host, field, "field");
+                ExpectCorners(host, swap, "swap");
+                Color swapFace = Paint(swap).GetPixel(17, 17);
+                Check(Same(swapFace, Color.FromArgb(30, 34, 43)), "swap face " + swapFace);
                 Color face = Paint(pill).GetPixel(16, pill.Height / 2);
                 Check(Same(face, Color.FromArgb(30, 34, 43)), "pill face " + face);
                 Color send = Paint(filled).GetPixel(14, filled.Height / 2);

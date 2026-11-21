@@ -89,7 +89,11 @@ namespace Chatter.Tests {
                 PreferencesStore.Save(source, path);
                 Check(!File.ReadAllText(path).Contains(source.ApiKey), "plaintext key on disk");
                 Check(PreferencesStore.TryLoad(out var loaded, path), "preferences read");
-                Check(loaded.ApiKey == source.ApiKey && loaded.Endpoint == source.Endpoint && loaded.IncomingLanguage == "pl" && loaded.OutgoingLanguage == "ko" && !loaded.AutoTranslateIncoming && !loaded.StartReading, "preferences roundtrip");
+                Check(loaded.ApiKey == source.ApiKey && loaded.Endpoint == source.Endpoint && loaded.IncomingLanguage == "pl" && loaded.OutgoingLanguage == "ko" && loaded.OutgoingSource == "en" && !loaded.AutoTranslateIncoming && !loaded.StartReading, "preferences roundtrip");
+                source.OutgoingSource = "de";
+                PreferencesStore.Save(source, path);
+                Check(PreferencesStore.TryLoad(out loaded, path) && loaded.OutgoingSource == "de", "write language roundtrip");
+                source.OutgoingSource = "en";
                 source.Endpoint = ChatRules.LocalTranslator;
                 PreferencesStore.Save(source, path);
                 Check(PreferencesStore.TryLoad(out loaded, path) && loaded.ApiKey == "", "local retained cloud key");
@@ -102,12 +106,12 @@ namespace Chatter.Tests {
                 File.WriteAllText(path, new JavaScriptSerializer().Serialize(values));
                 Check(!PreferencesStore.TryLoad(out _, path), "invalid key accepted");
                 File.WriteAllText(path, "{\"version\":1,\"endpoint\":\"local\",\"encryptedKey\":\"\",\"incomingLanguage\":\"en\",\"outgoingLanguage\":\"channel\",\"autoTranslateIncoming\":true,\"startReading\":true}");
-                Check(PreferencesStore.TryLoad(out loaded, path) && loaded.Endpoint == ChatRules.LocalTranslator && loaded.ManualEndpoint == "" && loaded.Channels.Count == 0, "version 1 settings");
+                Check(PreferencesStore.TryLoad(out loaded, path) && loaded.Endpoint == ChatRules.LocalTranslator && loaded.ManualEndpoint == "" && loaded.OutgoingSource == "en" && loaded.Channels.Count == 0, "version 1 settings");
                 source = new AppPreferences {
                     Endpoint = "https://libre.example/translate", ApiKey = "libre-key", ManualEndpoint = Translator.DeepLFree, ManualApiKey = "manual-secret",
                     IncomingLanguage = "en", OutgoingLanguage = "channel", AutoTranslateIncoming = true
                 };
-                Check(source.Remember(new ChannelPreference { Name = "#osu", IncomingLanguage = "pl", OutgoingLanguage = "ja", AutoTranslate = false }), "channel saved");
+                Check(source.Remember(new ChannelPreference { Name = "#osu", IncomingLanguage = "pl", OutgoingLanguage = "ja", OutgoingSource = "de", AutoTranslate = false }), "channel saved");
                 Check(source.Remember(new ChannelPreference { Name = "игрок", IncomingLanguage = "ru", AutoTranslate = true }), "unicode channel");
                 PreferencesStore.Save(source, path);
                 string disk = File.ReadAllText(path);
@@ -116,14 +120,18 @@ namespace Chatter.Tests {
                 Check(loaded.Endpoint == source.Endpoint && loaded.ApiKey == "libre-key" && loaded.ManualEndpoint == Translator.DeepLFree && loaded.ManualApiKey == "manual-secret", "provider roundtrip");
                 var osu = loaded.FindChannel("#osu");
                 var player = loaded.FindChannel("игрок");
-                Check(osu != null && osu.IncomingLanguage == "pl" && osu.OutgoingLanguage == "ja" && osu.AutoTranslate == false, "osu channel roundtrip");
-                Check(player != null && player.IncomingLanguage == "ru" && player.AutoTranslate == true && player.OutgoingLanguage == "", "player channel roundtrip");
+                Check(osu != null && osu.IncomingLanguage == "pl" && osu.OutgoingLanguage == "ja" && osu.OutgoingSource == "de" && osu.AutoTranslate == false, "osu channel roundtrip");
+                Check(player != null && player.IncomingLanguage == "ru" && player.AutoTranslate == true && player.OutgoingLanguage == "" && player.OutgoingSource == "", "player channel roundtrip");
+                Check(!source.Remember(new ChannelPreference { Name = "#bad", OutgoingSource = "zz" }), "invalid write language");
                 var rows = (System.Collections.ArrayList)new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(disk)["channels"];
                 rows.Add(new Dictionary<string, object> { { "name", "bad\nname" }, { "incoming", "nope" } });
                 var document = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(disk);
                 document["channels"] = rows;
                 File.WriteAllText(path, new JavaScriptSerializer().Serialize(document));
                 Check(PreferencesStore.TryLoad(out loaded, path) && loaded.FindChannel("#osu") != null && loaded.FindChannel("bad\nname") == null, "invalid channel rejected the file");
+                loaded.OutgoingSource = "zz";
+                try { PreferencesStore.Save(loaded, path); Check(false, "invalid write language saved"); }
+                catch (InvalidOperationException) { }
                 var crowded = new AppPreferences();
                 for (int i = 0; i < AppPreferences.MaxChannels + 1; i++)
                     Check(crowded.Remember(new ChannelPreference { Name = "#c" + i }), "remember channel");
@@ -156,10 +164,16 @@ namespace Chatter.Tests {
                 Check(((CheckBox)Get(setup, "automatic")).Checked, "saved cloud preference was lost");
             var current = new AppPreferences {
                 Endpoint = "https://libre.example/translate", ApiKey = "libre-key", ManualEndpoint = Translator.DeepLFree, ManualApiKey = "deepl-key",
-                IncomingLanguage = "en", OutgoingLanguage = "channel", AutoTranslateIncoming = true
+                IncomingLanguage = "en", OutgoingLanguage = "channel", OutgoingSource = "de", AutoTranslateIncoming = true
             };
-            current.Remember(new ChannelPreference { Name = "#osu", IncomingLanguage = "pl", OutgoingLanguage = "ja", AutoTranslate = false });
+            current.Remember(new ChannelPreference { Name = "#osu", IncomingLanguage = "pl", OutgoingLanguage = "ja", OutgoingSource = "fr", AutoTranslate = false });
             using (var setup = new SetupForm(current, false, false)) {
+                Check(((ComboBox)Get(setup, "writing")).SelectedIndex == Array.IndexOf(ChatRules.Languages, "de"), "write language loaded");
+                Check(!((Control)Get(setup, "languageSwap")).Enabled, "swap waits for a send language");
+                ((ComboBox)Get(setup, "outgoing")).SelectedIndex = Array.IndexOf(ChatRules.Languages, "pl") + 1;
+                Check(((Control)Get(setup, "languageSwap")).Enabled, "swap enabled for a language pair");
+                Call(setup, "SwapDefaults");
+                Check(((ComboBox)Get(setup, "writing")).SelectedIndex == Array.IndexOf(ChatRules.Languages, "pl") && ((ComboBox)Get(setup, "outgoing")).SelectedIndex == Array.IndexOf(ChatRules.Languages, "de") + 1, "setup swap");
                 Check(((ComboBox)Get(setup, "provider")).SelectedIndex == 3, "automatic libre");
                 Check(((ComboBox)Get(setup, "manualProvider")).SelectedIndex == 2, "manual deepl");
                 Check(((TextBox)Get(Get(setup, "manualKey"), "Input")).Text == "deepl-key", "manual key loaded");
@@ -171,9 +185,9 @@ namespace Chatter.Tests {
                 ((ComboBox)Get(setup, "manualProvider")).SelectedIndex = 2;
                 ((TextBox)Get(Get(setup, "manualKey"), "Input")).Text = "deepl-key";
                 Call(setup, "SaveChoices");
-                Check(setup.Result != null && setup.Result.Endpoint == current.Endpoint && setup.Result.ApiKey == "libre-key" && setup.Result.ManualEndpoint == Translator.DeepLFree && setup.Result.ManualApiKey == "deepl-key", "both providers saved");
+                Check(setup.Result != null && setup.Result.Endpoint == current.Endpoint && setup.Result.ApiKey == "libre-key" && setup.Result.ManualEndpoint == Translator.DeepLFree && setup.Result.ManualApiKey == "deepl-key" && setup.Result.OutgoingSource == "pl", "both providers saved");
                 var kept = setup.Result.FindChannel("#osu");
-                Check(kept != null && kept.IncomingLanguage == "pl" && kept.OutgoingLanguage == "ja" && kept.AutoTranslate == false, "channel settings survived the dialog");
+                Check(kept != null && kept.IncomingLanguage == "pl" && kept.OutgoingLanguage == "ja" && kept.OutgoingSource == "fr" && kept.AutoTranslate == false, "channel settings survived the dialog");
             }
             using (var main = new MainForm(new AppPreferences { Endpoint = Translator.DeepLFree, ApiKey = "fixture-test-key", AutoTranslateIncoming = false, StartReading = false, OutgoingLanguage = "pl" })) {
                 var handle = main.Handle;
@@ -216,22 +230,47 @@ namespace Chatter.Tests {
                 Check(On(main), "default auto");
                 Invoke(main, "SetIncoming", "de");
                 Invoke(main, "SetOutgoing", "ko");
+                Invoke(main, "SetOutgoingSource", "fr");
                 Click(Get(main, "auto"));
                 Invoke(main, "Select", "#osu");
-                Check(Caption(main, "incomingButton") == "Polish" && On(main) == false && Caption(main, "languageButton") == "Japanese", "first channel preserved");
+                Check(Caption(main, "incomingButton") == "Polish" && On(main) == false && Caption(main, "fromButton") == "English" && Caption(main, "languageButton") == "Japanese", "first channel preserved");
                 Invoke(main, "Select", "#russian");
-                Check(Caption(main, "incomingButton") == "German" && Caption(main, "languageButton") == "Korean" && On(main) == false, "edits preserved");
+                Check(Caption(main, "incomingButton") == "German" && Caption(main, "fromButton") == "French" && Caption(main, "languageButton") == "Korean" && On(main) == false, "edits preserved");
                 var stored = ((AppPreferences)Get(main, "preferences")).FindChannel("#russian");
-                Check(stored != null && stored.IncomingLanguage == "de" && stored.OutgoingLanguage == "ko" && stored.AutoTranslate == false, "channel record");
+                Check(stored != null && stored.IncomingLanguage == "de" && stored.OutgoingLanguage == "ko" && stored.OutgoingSource == "fr" && stored.AutoTranslate == false, "channel record");
                 var original = ((AppPreferences)Get(main, "preferences")).FindChannel("#osu");
                 Check(original != null && original.IncomingLanguage == "pl" && original.OutgoingLanguage == "ja" && original.AutoTranslate == false, "other channel record");
                 Invoke(main, "Select", "#hebrew");
                 var input = (TextBox)Get(Get(main, "draft"), "Input");
-                Check(Caption(main, "languageButton") == "Hebrew" && input.RightToLeft == RightToLeft.Yes, "hebrew writing direction");
-                Invoke(main, "SetOutgoing", "tr");
-                Check(Caption(main, "languageButton") == "Turkish" && input.RightToLeft == RightToLeft.No, "turkish writing direction");
-                Invoke(main, "SetOutgoing", "ar");
-                Check(Caption(main, "languageButton") == "Arabic" && input.RightToLeft == RightToLeft.Yes, "arabic writing direction");
+                var preview = (Label)Get(main, "preview");
+                Check(Caption(main, "fromButton") == "English" && Caption(main, "languageButton") == "Hebrew" && input.RightToLeft == RightToLeft.No && preview.RightToLeft == RightToLeft.Yes, "english writing in a hebrew channel");
+                Invoke(main, "SetOutgoingSource", "he");
+                Check(Caption(main, "fromButton") == "Hebrew" && input.RightToLeft == RightToLeft.Yes, "hebrew writing direction");
+                Invoke(main, "SetOutgoingSource", "tr");
+                Check(Caption(main, "fromButton") == "Turkish" && input.RightToLeft == RightToLeft.No, "turkish writing direction");
+                Invoke(main, "SetOutgoingSource", "ar");
+                Check(Caption(main, "fromButton") == "Arabic" && input.RightToLeft == RightToLeft.Yes, "arabic writing direction");
+                Invoke(main, "SwapLanguages");
+                Check(Caption(main, "fromButton") == "Hebrew" && Caption(main, "languageButton") == "Arabic" && input.RightToLeft == RightToLeft.Yes && preview.RightToLeft == RightToLeft.Yes, "swap exchanges languages");
+                var swapped = ((AppPreferences)Get(main, "preferences")).FindChannel("#hebrew");
+                Check(swapped != null && swapped.OutgoingSource == "he" && swapped.OutgoingLanguage == "ar", "swapped record");
+                var draft = (TranslationRequest)Invoke(main, "DraftRequest", "hello");
+                Check(draft.Source == "he" && draft.Target == "ar", "draft uses the swapped pair");
+                Invoke(main, "Select", "#russian");
+                Check(Caption(main, "fromButton") == "French" && Caption(main, "languageButton") == "Korean", "swap left the other channel");
+                main.Size = main.MinimumSize;
+                Call(main, "OpenSettings");
+                var from = (Control)Get(main, "fromButton");
+                var swap = (Control)Get(main, "swapButton");
+                var to = (Control)Get(main, "languageButton");
+                var previewButton = (Control)Get(main, "previewButton");
+                var send = (Control)Get(main, "send");
+                Check(from.Right <= swap.Left && swap.Right <= to.Left && to.Right <= previewButton.Left && previewButton.Right <= send.Left, "swap sits between languages");
+                Check(from.Top == swap.Top && swap.Top == to.Top && from.Height == 34 && swap.Width == 34, "language row aligned");
+                Check(from.Left >= 8 && send.Right <= send.Parent.ClientSize.Width, "language row fits");
+                var fromLabel = (Control)Get(main, "fromCaption");
+                var toLabel = (Control)Get(main, "toCaption");
+                Check(fromLabel.Text == "From" && toLabel.Text == "To" && fromLabel.Bottom <= from.Top && toLabel.Left == to.Left, "from and to captions");
             }
         }
         static string Caption(object main, string field) {
@@ -245,12 +284,12 @@ namespace Chatter.Tests {
         static void Click(object control) {
             control.GetType().GetMethod("OnClick", BindingFlags.Instance | BindingFlags.NonPublic, null, new[] { typeof(EventArgs) }, null).Invoke(control, new object[] { EventArgs.Empty });
         }
-        static void Invoke(object target, string name, params object[] args) {
+        static object Invoke(object target, string name, params object[] args) {
             var types = new Type[args.Length];
             for (int i = 0; i < args.Length; i++) types[i] = args[i] == null ? typeof(object) : args[i].GetType();
             var method = target.GetType().GetMethod(name, Members, null, types, null);
             if (method == null) throw new MissingMethodException(name);
-            method.Invoke(target, args);
+            return method.Invoke(target, args);
         }
     }
 }

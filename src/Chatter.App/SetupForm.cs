@@ -43,6 +43,9 @@ namespace Chatter.App {
         readonly ComboBox manualProvider = Picker();
         readonly ComboBox incoming = Picker();
         readonly ComboBox outgoing = Picker();
+        readonly ComboBox writing = Picker();
+        readonly SwapButton languageSwap = new SwapButton();
+        readonly ToolTip tips = new ToolTip();
         readonly LineField key = new LineField();
         readonly LineField server = new LineField();
         readonly LineField manualKey = new LineField();
@@ -56,14 +59,15 @@ namespace Chatter.App {
         readonly Label manualServerLabel = Copy();
         readonly Label error = Copy();
         readonly Label incomingLabel = Copy("Translate incoming chat to");
-        readonly Label outgoingLabel = Copy("Default outgoing language");
+        readonly Label writingLabel = Copy("Language you write in");
+        readonly Label outgoingLabel = Copy("Default language to send");
         readonly Label autoHint = Copy("Includes existing messages in the selected chat. Cloud translations count toward your API usage.");
         readonly CheckBox automatic = new CheckBox();
         readonly CheckBox startReading = new CheckBox();
         readonly PillButton finish = new PillButton { Filled = true };
         readonly PillButton cancel = new PillButton { Caption = "Cancel" };
         readonly bool persist;
-        readonly Panel content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 690) };
+        readonly Panel content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 690), BackColor = Palette.Bg };
         readonly List<ChannelPreference> keptChannels = new List<ChannelPreference>();
         bool loading;
         int previousProvider = -1;
@@ -110,8 +114,18 @@ namespace Chatter.App {
             Put(incomingLabel, 28, 653, 270, 20);
             Put(outgoingLabel, 318, 391, 270, 20);
             incoming.Items.AddRange(ChatRules.LanguageNames);
+            writing.Items.AddRange(ChatRules.LanguageNames);
             outgoing.Items.Add("Match the channel name");
             outgoing.Items.AddRange(ChatRules.LanguageNames);
+            Put(writingLabel, 28, 653, 236, 20);
+            Put(writing, 28, 679, 236, 32);
+            Put(languageSwap, 272, 679, 34, 32);
+            tips.SetToolTip(languageSwap, "Swap languages");
+            tips.SetToolTip(writing, "Language to translate from");
+            tips.SetToolTip(outgoing, "Language to translate to");
+            languageSwap.Click += delegate { SwapDefaults(); };
+            outgoing.SelectedIndexChanged += delegate { languageSwap.Enabled = outgoing.SelectedIndex > 0; };
+            FormClosed += delegate { tips.Dispose(); };
             Put(incoming, 28, 417, 270, 32);
             Put(outgoing, 318, 417, 270, 32);
             automatic.Text = "Automatically translate incoming chat";
@@ -143,6 +157,7 @@ namespace Chatter.App {
             server.Input.Text = provider.SelectedIndex == 3 ? current.Endpoint : "https://";
             manualServer.Input.Text = manualProvider.SelectedIndex == 4 ? current.ManualEndpoint : "https://";
             incoming.SelectedIndex = Math.Max(0, Array.IndexOf(ChatRules.Languages, current.IncomingLanguage));
+            writing.SelectedIndex = Math.Max(0, Array.IndexOf(ChatRules.Languages, current.OutgoingSource));
             outgoing.SelectedIndex = current.OutgoingLanguage == "channel" ? 0 : Array.IndexOf(ChatRules.Languages, current.OutgoingLanguage) + 1;
             automatic.Checked = current.AutoTranslateIncoming;
             startReading.Checked = current.StartReading;
@@ -242,11 +257,16 @@ namespace Chatter.App {
                 manualServer.SetBounds(px(28), px(y + 24), px(560), px(40));
                 y += 74;
             }
+            writingLabel.SetBounds(px(28), px(y), px(236), px(20));
+            outgoingLabel.SetBounds(px(314), px(y), px(274), px(20));
+            writing.SetBounds(px(28), px(y + 26), px(236), px(32));
+            languageSwap.SetBounds(px(272), px(y + 25), px(34), px(34));
+            outgoing.SetBounds(px(314), px(y + 26), px(274), px(32));
+            languageSwap.Enabled = outgoing.SelectedIndex > 0;
+            y += 70;
             incomingLabel.SetBounds(px(28), px(y), px(270), px(20));
-            outgoingLabel.SetBounds(px(318), px(y), px(270), px(20));
             incoming.SetBounds(px(28), px(y + 26), px(270), px(32));
-            outgoing.SetBounds(px(318), px(y + 26), px(270), px(32));
-            y += 75;
+            y += 70;
             automatic.SetBounds(px(28), px(y), px(560), px(24));
             autoHint.SetBounds(px(48), px(y + 28), px(540), px(38));
             y += 74;
@@ -283,6 +303,14 @@ namespace Chatter.App {
             }
         }
 
+        void SwapDefaults() {
+            if (outgoing.SelectedIndex <= 0 || writing.SelectedIndex < 0) return;
+            int from = writing.SelectedIndex;
+            int to = outgoing.SelectedIndex - 1;
+            writing.SelectedIndex = to;
+            outgoing.SelectedIndex = from + 1;
+        }
+
         void SaveChoices() {
             try {
                 var choices = new AppPreferences {
@@ -291,6 +319,7 @@ namespace Chatter.App {
                     ManualEndpoint = ManualEndpoint(),
                     ManualApiKey = manualProvider.SelectedIndex <= 1 ? "" : manualKey.Input.Text.Trim(),
                     IncomingLanguage = incoming.SelectedIndex >= 0 ? ChatRules.Languages[incoming.SelectedIndex] : "",
+                    OutgoingSource = writing.SelectedIndex >= 0 ? ChatRules.Languages[writing.SelectedIndex] : "en",
                     OutgoingLanguage = outgoing.SelectedIndex == 0 ? "channel" : outgoing.SelectedIndex > 0 ? ChatRules.Languages[outgoing.SelectedIndex - 1] : "",
                     AutoTranslateIncoming = automatic.Checked, StartReading = startReading.Checked
                 };

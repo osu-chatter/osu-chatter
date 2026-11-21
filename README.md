@@ -46,7 +46,7 @@ On first launch, choose a provider and languages. You can change them later in *
 
 You can keep two providers at once. The automatic provider translates new messages when auto-translate is on, and it translates outgoing messages when you preview or send. The manual provider is used when you click **Translate** on a message. For example, use a LibreTranslate server automatically and reserve DeepL for messages you choose to translate. A message that was translated automatically can be translated again with the manual provider.
 
-Each conversation remembers the incoming language, the outgoing language, and whether auto-translate is on. Those choices are saved with your other settings. A conversation you have not customized follows the defaults from translation preferences.
+Each conversation remembers the incoming language, the language you write in, the outgoing language, and whether auto-translate is on. Those choices are saved with your other settings. A conversation you have not customized follows the defaults from translation preferences. Under the message box, choose the language to translate from and the language to translate to. The swap button between them exchanges the two languages.
 
 Local translation supports English, Polish, Russian, Korean, Japanese, Chinese, German, French, Spanish, Portuguese, Ukrainian, Hebrew, Arabic, and Turkish. Other language pairs translate through English. Results can vary, especially for short messages. Hebrew and Arabic are shown right to left.
 

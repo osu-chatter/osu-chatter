@@ -24,7 +24,7 @@ namespace Chatter.Tests {
                     using (var listener = new HttpListener()) {
                         listener.Prefixes.Add("http://127.0.0.1:17322/");
                         listener.Start();
-                        Exception serverFailure = null;
+                        Exception? serverFailure = null;
                         string requestBody = "", authorization = "", method = "";
                         var server = new Thread(() => {
                             try {
@@ -85,11 +85,13 @@ namespace Chatter.Tests {
             string path = Path.Combine(directory, "settings.json");
             try {
                 Check(!PreferencesStore.TryLoad(out _, path), "missing preferences");
-                var source = new AppPreferences { Endpoint = Translator.DeepLPro, ApiKey = "fixture-test-key", IncomingLanguage = "pl", OutgoingLanguage = "ko", AutoTranslateIncoming = false, StartReading = false };
+                var source = new AppPreferences { Endpoint = Translator.DeepLPro, ApiKey = "fixture-test-key", IncomingLanguage = "pl", OutgoingLanguage = "ko", AutoTranslateIncoming = false, StartReading = false, ShowGameOverlay = true, TranslateGameChat = true };
                 PreferencesStore.Save(source, path);
                 Check(!File.ReadAllText(path).Contains(source.ApiKey), "plaintext key on disk");
                 Check(PreferencesStore.TryLoad(out var loaded, path), "preferences read");
                 Check(loaded.ApiKey == source.ApiKey && loaded.Endpoint == source.Endpoint && loaded.IncomingLanguage == "pl" && loaded.OutgoingLanguage == "ko" && loaded.OutgoingSource == "en" && !loaded.AutoTranslateIncoming && !loaded.StartReading, "preferences roundtrip");
+                Check(loaded.ShowGameOverlay && loaded.TranslateGameChat, "game display settings did not persist");
+                Check(!new AppPreferences().TranslateGameChat, "native display must start disabled");
                 source.OutgoingSource = "de";
                 PreferencesStore.Save(source, path);
                 Check(PreferencesStore.TryLoad(out loaded, path) && loaded.OutgoingSource == "de", "write language roundtrip");
@@ -106,7 +108,7 @@ namespace Chatter.Tests {
                 File.WriteAllText(path, new JavaScriptSerializer().Serialize(values));
                 Check(!PreferencesStore.TryLoad(out _, path), "invalid key accepted");
                 File.WriteAllText(path, "{\"version\":1,\"endpoint\":\"local\",\"encryptedKey\":\"\",\"incomingLanguage\":\"en\",\"outgoingLanguage\":\"channel\",\"autoTranslateIncoming\":true,\"startReading\":true}");
-                Check(PreferencesStore.TryLoad(out loaded, path) && loaded.Endpoint == ChatRules.LocalTranslator && loaded.ManualEndpoint == "" && loaded.OutgoingSource == "en" && loaded.Channels.Count == 0, "version 1 settings");
+                Check(PreferencesStore.TryLoad(out loaded, path) && loaded.Endpoint == ChatRules.LocalTranslator && loaded.ManualEndpoint == "" && loaded.OutgoingSource == "en" && loaded.Channels.Count == 0 && !loaded.TranslateGameChat, "version 1 settings");
                 source = new AppPreferences {
                     Endpoint = "https://libre.example/translate", ApiKey = "libre-key", ManualEndpoint = Translator.DeepLFree, ManualApiKey = "manual-secret",
                     IncomingLanguage = "en", OutgoingLanguage = "channel", AutoTranslateIncoming = true
@@ -158,13 +160,13 @@ namespace Chatter.Tests {
                 key.Text = "fixture-test-key";
                 ((ComboBox)Get(setup, "incoming")).SelectedIndex = 1;
                 Call(setup, "SaveChoices");
-                Check(setup.DialogResult == DialogResult.OK && setup.Result.Endpoint == Translator.DeepLFree && setup.Result.IncomingLanguage == "pl" && !setup.Result.AutoTranslateIncoming, "setup choices");
+                Check(setup.DialogResult == DialogResult.OK && setup.Result != null && setup.Result.Endpoint == Translator.DeepLFree && setup.Result.IncomingLanguage == "pl" && !setup.Result.AutoTranslateIncoming, "setup choices");
             }
             using (var setup = new SetupForm(new AppPreferences { Endpoint = Translator.DeepLPro, ApiKey = "fixture-test-key", AutoTranslateIncoming = true }, false, false))
                 Check(((CheckBox)Get(setup, "automatic")).Checked, "saved cloud preference was lost");
             var current = new AppPreferences {
                 Endpoint = "https://libre.example/translate", ApiKey = "libre-key", ManualEndpoint = Translator.DeepLFree, ManualApiKey = "deepl-key",
-                IncomingLanguage = "en", OutgoingLanguage = "channel", OutgoingSource = "de", AutoTranslateIncoming = true
+                IncomingLanguage = "en", OutgoingLanguage = "channel", OutgoingSource = "de", AutoTranslateIncoming = true, ShowGameOverlay = true, TranslateGameChat = true
             };
             current.Remember(new ChannelPreference { Name = "#osu", IncomingLanguage = "pl", OutgoingLanguage = "ja", OutgoingSource = "fr", AutoTranslate = false });
             using (var setup = new SetupForm(current, false, false)) {
@@ -186,7 +188,8 @@ namespace Chatter.Tests {
                 ((TextBox)Get(Get(setup, "manualKey"), "Input")).Text = "deepl-key";
                 Call(setup, "SaveChoices");
                 Check(setup.Result != null && setup.Result.Endpoint == current.Endpoint && setup.Result.ApiKey == "libre-key" && setup.Result.ManualEndpoint == Translator.DeepLFree && setup.Result.ManualApiKey == "deepl-key" && setup.Result.OutgoingSource == "pl", "both providers saved");
-                var kept = setup.Result.FindChannel("#osu");
+                Check(setup.Result?.ShowGameOverlay == true && setup.Result.TranslateGameChat, "display modes survived the preferences dialog");
+                var kept = setup.Result?.FindChannel("#osu");
                 Check(kept != null && kept.IncomingLanguage == "pl" && kept.OutgoingLanguage == "ja" && kept.OutgoingSource == "fr" && kept.AutoTranslate == false, "channel settings survived the dialog");
             }
             using (var main = new MainForm(new AppPreferences { Endpoint = Translator.DeepLFree, ApiKey = "fixture-test-key", AutoTranslateIncoming = false, StartReading = false, OutgoingLanguage = "pl" })) {
@@ -271,6 +274,14 @@ namespace Chatter.Tests {
                 var fromLabel = (Control)Get(main, "fromCaption");
                 var toLabel = (Control)Get(main, "toCaption");
                 Check(fromLabel.Text == "From" && toLabel.Text == "To" && fromLabel.Bottom <= from.Top && toLabel.Left == to.Left, "from and to captions");
+                var native = (Control)Get(main, "nativeChatButton");
+                var nativeHint = (Control)Get(main, "nativeChatHint");
+                Check(native.Bounds.Bottom <= nativeHint.Top && nativeHint.Bottom <= native.Parent.ClientSize.Height, "native controls fit minimum window");
+                Click(native);
+                Check(((AppPreferences)Get(main, "preferences")).TranslateGameChat && Caption(main, "nativeChatButton").EndsWith("On"), "native mode enabled");
+                Check(!((AppPreferences)Get(main, "preferences")).ShowGameOverlay, "native mode changed overlay preference");
+                Click(native);
+                Check(!((AppPreferences)Get(main, "preferences")).TranslateGameChat, "native mode disabled");
             }
         }
         static string Caption(object main, string field) {

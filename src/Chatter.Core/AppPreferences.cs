@@ -12,25 +12,28 @@ namespace Chatter {
         public string IncomingLanguage { get; set; } = "";
         public string OutgoingLanguage { get; set; } = "";
         public string OutgoingSource { get; set; } = "";
+        public string IncomingSource { get; set; } = "";
         public bool? AutoTranslate { get; set; }
 
         public ChannelPreference Copy() => new ChannelPreference {
-            Name = Name, IncomingLanguage = IncomingLanguage, OutgoingLanguage = OutgoingLanguage, OutgoingSource = OutgoingSource, AutoTranslate = AutoTranslate
+            Name = Name, IncomingLanguage = IncomingLanguage, OutgoingLanguage = OutgoingLanguage, OutgoingSource = OutgoingSource, IncomingSource = IncomingSource, AutoTranslate = AutoTranslate
         };
 
         public bool LanguagesValid() {
+            if (!string.IsNullOrEmpty(IncomingSource) && IncomingSource != "auto" && Array.IndexOf(ChatRules.Languages, IncomingSource) < 0) return false;
             IncomingLanguage = IncomingLanguage ?? "";
             OutgoingLanguage = OutgoingLanguage ?? "";
             OutgoingSource = OutgoingSource ?? "";
             if (IncomingLanguage.Length > 0 && Array.IndexOf(ChatRules.Languages, IncomingLanguage) < 0) return false;
             if (OutgoingLanguage.Length > 0 && Array.IndexOf(ChatRules.Languages, OutgoingLanguage) < 0) return false;
-            if (OutgoingSource.Length > 0 && Array.IndexOf(ChatRules.Languages, OutgoingSource) < 0) return false;
+            if (OutgoingSource.Length > 0 && Array.IndexOf(ChatRules.Languages, OutgoingSource) < 0 && OutgoingSource != "auto") return false;
             return true;
         }
     }
 
     public sealed class AppPreferences {
-        public const int MaxChannels = 48;
+        public const int MaxChannels = 128;
+        public ExperienceOptions Experience { get; set; } = new ExperienceOptions();
         public string Endpoint { get; set; } = ChatRules.LocalTranslator;
         public string ApiKey { get; set; } = "";
         public string ManualEndpoint { get; set; } = "";
@@ -40,6 +43,8 @@ namespace Chatter {
         public string OutgoingSource { get; set; } = "en";
         public bool AutoTranslateIncoming { get; set; } = true;
         public bool StartReading { get; set; } = true;
+        public bool ShowGameOverlay { get; set; }
+        public bool TranslateGameChat { get; set; }
         public List<ChannelPreference> Channels { get; set; } = new List<ChannelPreference>();
 
         public bool HasDistinctManualProvider =>
@@ -49,6 +54,9 @@ namespace Chatter {
             Endpoint == ChatRules.LocalTranslator || ManualEndpoint == ChatRules.LocalTranslator;
 
         public static string ProviderName(string endpoint) {
+            if (endpoint == Translator.LocalModel) return "Local AI translation";
+            if (endpoint == Translator.ChatApi) return "OpenAI-compatible translator";
+            if (endpoint == Translator.NoTranslation) return "Chat without translation";
             if (endpoint == Translator.DeepLFree) return "DeepL API Free";
             if (endpoint == Translator.DeepLPro) return "DeepL API Pro";
             if (string.IsNullOrEmpty(endpoint) || endpoint == ChatRules.LocalTranslator) return "Local translation";
@@ -65,13 +73,14 @@ namespace Chatter {
 
         public AppPreferences Copy() {
             var copy = (AppPreferences)MemberwiseClone();
+            copy.Experience = (Experience ?? new ExperienceOptions()).Copy();
             var source = Channels ?? new List<ChannelPreference>();
             copy.Channels = new List<ChannelPreference>(source.Count);
             for (int i = 0; i < source.Count; i++) if (source[i] != null) copy.Channels.Add(source[i].Copy());
             return copy;
         }
 
-        public ChannelPreference FindChannel(string name) {
+        public ChannelPreference? FindChannel(string name) {
             if (string.IsNullOrEmpty(name) || Channels == null) return null;
             for (int i = 0; i < Channels.Count; i++)
                 if (Channels[i] != null && string.Equals(Channels[i].Name, name, StringComparison.Ordinal)) return Channels[i];
@@ -92,6 +101,13 @@ namespace Chatter {
             bool useManual = manual && !string.IsNullOrEmpty(ManualEndpoint);
             request.Endpoint = useManual ? ManualEndpoint : Endpoint;
             request.ApiKey = useManual ? ManualApiKey ?? "" : ApiKey ?? "";
+            request.Glossary = Experience.Glossary;
+            request.ChatEndpoint = Experience.ChatEndpoint;
+            request.Model = Experience.ChatModel;
+            request.ModelPath = Experience.ModelPath;
+            request.RuntimePath = Experience.RuntimePath;
+            request.Threads = Experience.CpuThreads;
+            request.GpuLayers = Experience.GpuLayers;
         }
 
         public static bool IsChannelName(string name) {
@@ -101,8 +117,10 @@ namespace Chatter {
         }
 
         public void Validate() {
+            if (Experience == null) Experience = new ExperienceOptions();
+            Experience.Validate();
             if (Array.IndexOf(ChatRules.Languages, IncomingLanguage) < 0 ||
-                Array.IndexOf(ChatRules.Languages, OutgoingSource) < 0 ||
+                (OutgoingSource != "auto" && Array.IndexOf(ChatRules.Languages, OutgoingSource) < 0) ||
                 (OutgoingLanguage != "channel" && Array.IndexOf(ChatRules.Languages, OutgoingLanguage) < 0))
                 throw new InvalidOperationException("Choose an incoming and outgoing language.");
             new TranslationRequest { Endpoint = Endpoint, ApiKey = ApiKey, Text = "test", Source = "en", Target = IncomingLanguage }.Validate();
@@ -123,7 +141,7 @@ namespace Chatter {
         public const int MaxBytes = 65536;
         public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu-chatter", "settings.json");
         static readonly byte[] Entropy = Encoding.UTF8.GetBytes("osu-chatter/preferences/v1");
-        public static bool TryLoad(out AppPreferences preferences, string path = null) {
+        public static bool TryLoad(out AppPreferences preferences, string? path = null) {
             preferences = new AppPreferences();
             try {
                 path = path ?? DefaultPath;
@@ -141,7 +159,10 @@ namespace Chatter {
                     IncomingLanguage = (string)values["incomingLanguage"], OutgoingLanguage = (string)values["outgoingLanguage"],
                     OutgoingSource = SourceOrEnglish(ReadString(values, "outgoingSource")),
                     AutoTranslateIncoming = (bool)values["autoTranslateIncoming"], StartReading = (bool)values["startReading"],
-                    Channels = ReadChannels(values)
+                    ShowGameOverlay = values.TryGetValue("showGameOverlay", out object overlay) && overlay is true,
+                    TranslateGameChat = values.TryGetValue("translateGameChat", out object native) && native is true,
+                    Channels = ReadChannels(values),
+                    Experience = values.TryGetValue("experience", out object extra) ? new JavaScriptSerializer().ConvertToType<ExperienceOptions>(extra) : new ExperienceOptions()
                 };
                 loaded.Validate();
                 preferences = loaded;
@@ -150,13 +171,14 @@ namespace Chatter {
                 return false;
             }
         }
-        public static void Save(AppPreferences preferences, string path = null) {
+        public static void Save(AppPreferences preferences, string? path = null) {
             preferences.Validate();
             path = path ?? DefaultPath;
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
             string key = preferences.Endpoint == ChatRules.LocalTranslator ? "" : preferences.ApiKey;
             string manualKey = string.IsNullOrEmpty(preferences.ManualEndpoint) || preferences.ManualEndpoint == ChatRules.LocalTranslator ? "" : preferences.ManualApiKey;
             var values = new Dictionary<string, object> {
+                ["experience"] = preferences.Experience,
                 ["version"] = 2, ["endpoint"] = preferences.Endpoint,
                 ["encryptedKey"] = Protect(key),
                 ["manualEndpoint"] = preferences.ManualEndpoint ?? "",
@@ -164,6 +186,8 @@ namespace Chatter {
                 ["incomingLanguage"] = preferences.IncomingLanguage, ["outgoingLanguage"] = preferences.OutgoingLanguage,
                 ["outgoingSource"] = preferences.OutgoingSource,
                 ["autoTranslateIncoming"] = preferences.AutoTranslateIncoming, ["startReading"] = preferences.StartReading,
+                ["showGameOverlay"] = preferences.ShowGameOverlay,
+                ["translateGameChat"] = preferences.TranslateGameChat,
                 ["channels"] = WriteChannels(preferences.Channels)
             };
             string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
@@ -202,7 +226,7 @@ namespace Chatter {
             for (int i = 0; i < rows.Count; i++) {
                 var row = rows[i] as Dictionary<string, object>;
                 if (row == null) continue;
-                var channel = new ChannelPreference { Name = ReadString(row, "name"), IncomingLanguage = ReadString(row, "incoming"), OutgoingLanguage = ReadString(row, "outgoing"), OutgoingSource = ReadString(row, "from") };
+                var channel = new ChannelPreference { Name = ReadString(row, "name"), IncomingLanguage = ReadString(row, "incoming"), OutgoingLanguage = ReadString(row, "outgoing"), OutgoingSource = ReadString(row, "from"), IncomingSource = ReadString(row, "source") };
                 object auto;
                 if (row.TryGetValue("auto", out auto) && auto is bool) channel.AutoTranslate = (bool)auto;
                 if (!AppPreferences.IsChannelName(channel.Name) || !channel.LanguagesValid()) continue;
@@ -224,6 +248,7 @@ namespace Chatter {
                 if (!string.IsNullOrEmpty(channel.IncomingLanguage)) row["incoming"] = channel.IncomingLanguage;
                 if (!string.IsNullOrEmpty(channel.OutgoingLanguage)) row["outgoing"] = channel.OutgoingLanguage;
                 if (!string.IsNullOrEmpty(channel.OutgoingSource)) row["from"] = channel.OutgoingSource;
+                if (!string.IsNullOrEmpty(channel.IncomingSource)) row["source"] = channel.IncomingSource;
                 if (channel.AutoTranslate.HasValue) row["auto"] = channel.AutoTranslate.Value;
                 rows.Add(row);
             }

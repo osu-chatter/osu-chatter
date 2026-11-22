@@ -20,9 +20,9 @@ namespace Chatter {
 
     /// <summary>Decodes one fresh account observation; failed reads never reuse identity.</summary>
     internal static class StableAccountReader {
-        internal static StableAccountSnapshot Read(IProcessMemory memory, IDictionary<string, uint> addresses) {
+        internal static StableAccountSnapshot Read(IProcessMemory memory, IDictionary<string, uint>? addresses) {
             uint address;
-            if (!addresses.TryGetValue("userProfilePtr", out address)) return StableAccountSnapshot.Unavailable;
+            if (addresses == null || !addresses.TryGetValue("userProfilePtr", out address)) return StableAccountSnapshot.Unavailable;
             uint? slot = ChatGraph.Word(memory, address);
             if (!slot.HasValue || slot.Value == 0) return StableAccountSnapshot.Unavailable;
             uint? profile = ChatGraph.Word(memory, slot.Value);
@@ -45,9 +45,9 @@ namespace Chatter {
             return new StableAccountSnapshot(name, accountId, login);
         }
 
-        internal static int? GameState(IProcessMemory memory, IDictionary<string, uint> addresses) {
+        internal static int? GameState(IProcessMemory memory, IDictionary<string, uint>? addresses) {
             uint address;
-            if (!addresses.TryGetValue("statusPtr", out address)) return null;
+            if (addresses == null || !addresses.TryGetValue("statusPtr", out address)) return null;
             uint? slot = ChatGraph.Word(memory, address);
             if (!slot.HasValue || slot.Value == 0) return null;
             uint? state = ChatGraph.Word(memory, slot.Value);
@@ -58,7 +58,7 @@ namespace Chatter {
             uint? length = ChatGraph.Word(memory, address + Clr32Layout.StringLength);
             if (!length.HasValue || length.Value == 0 || length.Value > 1000) return null;
             int size = (int)length.Value * Clr32Layout.CharacterSize;
-            byte[] raw = memory.ReadBytes(address + Clr32Layout.StringData, size);
+            byte[]? raw = memory.ReadBytes(address + Clr32Layout.StringData, size);
             if (raw == null || raw.Length != size) return null;
             var chars = new char[raw.Length / Clr32Layout.CharacterSize];
             for (int i = 0; i < chars.Length; i++) chars[i] = (char)(raw[i * 2] | (raw[i * 2 + 1] << 8));

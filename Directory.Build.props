@@ -1,10 +1,20 @@
 <Project>
   <PropertyGroup>
+    <Version Condition="'$(Version)' == ''">1.0.0</Version>
+    <ChatterBridgeAssemblyName>Chatter.Bridge.Runtime_$([System.String]::Copy('$(Version)').Replace('-', '_').Replace('+', '_'))</ChatterBridgeAssemblyName>
     <PlatformTarget>x86</PlatformTarget>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <Deterministic>true</Deterministic>
+    <!-- Keep developer checkout paths out of compiler/debug metadata. -->
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
     <AppendTargetFrameworkToOutputPath>true</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>Chatter.BridgeAssemblyName</_Parameter1>
+      <_Parameter2>$(ChatterBridgeAssemblyName)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
 </Project>

@@ -147,7 +147,7 @@ namespace Chatter.Tests {
             readonly IProcessMemory memory;
             readonly uint address;
             internal Unreadable(IProcessMemory memory, uint address) { this.memory = memory; this.address = address; }
-            public byte[] ReadBytes(uint at, int size) { return at == address ? null! : memory.ReadBytes(at, size); }
+            public byte[]? ReadBytes(uint at, int size) { return at == address ? null! : memory.ReadBytes(at, size); }
         }
 
         sealed class ChangingWord : IProcessMemory {
@@ -155,8 +155,8 @@ namespace Chatter.Tests {
             readonly uint address;
             internal int Reads;
             internal ChangingWord(IProcessMemory memory, uint address) { this.memory = memory; this.address = address; }
-            public byte[] ReadBytes(uint at, int size) {
-                byte[] bytes = memory.ReadBytes(at, size);
+            public byte[]? ReadBytes(uint at, int size) {
+                byte[]? bytes = memory.ReadBytes(at, size);
                 if (at == address && ++Reads > 1) return BitConverter.GetBytes(BitConverter.ToUInt32(bytes, 0) ^ 1u);
                 return bytes;
             }

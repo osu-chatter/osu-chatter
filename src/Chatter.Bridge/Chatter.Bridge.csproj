@@ -2,9 +2,14 @@
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
     <RootNamespace>Chatter.Bridge</RootNamespace>
-    <AssemblyName>Chatter.Bridge</AssemblyName>
+    <!-- CLR weak-name binding can reuse an old bridge despite a changed AssemblyVersion. -->
+    <AssemblyName>$(ChatterBridgeAssemblyName)</AssemblyName>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.4.3" />
+    <Compile Include="..\Shared\NativeCommandProtocol.cs" Link="Shared\NativeCommandProtocol.cs" />
+    <Compile Include="..\Shared\NativeChatProtocol.cs" Link="Shared\NativeChatProtocol.cs" />
     <Compile Include="..\Shared\SharedChatRules.cs" Link="Shared\SharedChatRules.cs" />
     <Compile Include="..\Shared\StableCompatibilityProfile.cs" Link="Shared\StableCompatibilityProfile.cs" />
   </ItemGroup>

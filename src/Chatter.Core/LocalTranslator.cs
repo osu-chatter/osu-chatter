@@ -12,10 +12,10 @@ namespace Chatter {
         readonly object gate = new object();
         readonly CancellationTokenSource stopping = new CancellationTokenSource();
         static readonly string[] RuntimeSettings = LoadRuntimeSettings();
-        Process worker;
-        Process active;
-        public event Action<string> Status;
-        public static string DataDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu-chatter", "translator-v1");
+        Process? worker;
+        Process? active;
+        public event Action<string>? Status;
+        public static string DataDirectory => string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CHATTER_TRANSLATOR_ROOT")) ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu-chatter", "translator-v2") : Path.GetFullPath(Environment.GetEnvironmentVariable("CHATTER_TRANSLATOR_ROOT"));
         static string PythonDirectory => Path.Combine(DataDirectory, "python-" + RuntimeSettings[0]);
         static string PythonPath => Path.Combine(PythonDirectory, RuntimeSettings[1]);
 
@@ -48,14 +48,20 @@ namespace Chatter {
                 Report("Checking local translation setup…");
                 var info = Info(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), @"WindowsPowerShell\v1.0\powershell.exe"),
                     "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + Path.Combine(DataDirectory, "setup.ps1") + "\" -Root \"" + DataDirectory + "\"");
+                // A launch from PowerShell 7 must not hide Windows PowerShell's own modules.
+                info.EnvironmentVariables.Remove("PSModulePath");
                 using (var setup = Process.Start(info)) {
                     active = setup;
                     if (stopping.IsCancellationRequested) { Stop(setup); stopping.Token.ThrowIfCancellationRequested(); }
-                    setup.ErrorDataReceived += delegate { }; // Never retain process diagnostics containing input.
+                    var setupErrors = new StringBuilder();
+                    setup.ErrorDataReceived += (sender, e) => { if (e.Data != null && setupErrors.Length < 16000) setupErrors.AppendLine(e.Data); };
                     setup.BeginErrorReadLine();
                     ReadUntil(setup, line => { Report(line); return false; }, TimeSpan.FromMinutes(20), false);
-                    if (!setup.WaitForExit(5000) || setup.ExitCode != 0)
-                        throw new InvalidOperationException("Translation setup failed. Check your connection and retry. Setup details are in " + Path.Combine(DataDirectory, "setup.log"));
+                    if (!setup.WaitForExit(5000) || setup.ExitCode != 0) {
+                        // Setup has no chat input. Worker diagnostics remain discarded.
+                        File.WriteAllText(Path.Combine(DataDirectory, "launcher-error.log"), setupErrors.ToString());
+                        throw new InvalidOperationException("Translation setup failed. Check your connection and retry. Setup details are in " + Path.Combine(DataDirectory, "launcher-error.log"));
+                    }
                     active = null;
                 }
             }
@@ -69,20 +75,25 @@ namespace Chatter {
             Report("");
         }
 
-        public string Translate(TranslationRequest request) {
+        public void Preload(string source, string target) {
+            if (Array.IndexOf(ChatRules.Languages, source) < 0 || Array.IndexOf(ChatRules.Languages, target) < 0) throw new InvalidOperationException("Choose supported languages.");
+            Exchange(new TranslationRequest { Source = source, Target = target, Text = "" }, true);
+        }
+        public string Translate(TranslationRequest request) => Exchange(request, false);
+        string Exchange(TranslationRequest request, bool preload) {
             lock (gate) {
                 try {
                     EnsureWorker();
                     // Frameworks StandardInput writer follows the Windows console code page
                     // Write UTF8 bytes explicitly so Cyrillic and Korean survive
-                    byte[] payload = Encoding.UTF8.GetBytes("{\"text\":" + Translator.Json(request.Text) + ",\"source\":" + Translator.Json(request.Source) + ",\"target\":" + Translator.Json(request.Target) + "}\n");
-                    worker.StandardInput.BaseStream.Write(payload, 0, payload.Length);
+                    byte[] payload = Encoding.UTF8.GetBytes("{\"preload\":" + (preload ? "true" : "false") + ",\"text\":" + Translator.Json(request.Text) + ",\"source\":" + Translator.Json(request.Source) + ",\"target\":" + Translator.Json(request.Target) + "}\n");
+                    (worker ?? throw new InvalidOperationException("Translator worker did not start")).StandardInput.BaseStream.Write(payload, 0, payload.Length);
                     worker.StandardInput.BaseStream.Flush();
-                    string result = null;
+                    string? result = null;
                     ReadUntil(worker, line => {
-                        string status = Translator.JsonString(line, "status");
+                        string? status = Translator.JsonString(line, "status");
                         if (status != null) { Report(status); return false; }
-                        string error = Translator.JsonString(line, "error");
+                        string? error = Translator.JsonString(line, "error");
                         if (error != null) throw new InvalidOperationException(error);
                         result = Translator.JsonString(line, "translatedText");
                         return result != null;
@@ -130,6 +141,7 @@ namespace Chatter {
             info.EnvironmentVariables["PYTHONUTF8"] = "1";
             info.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8";
             info.EnvironmentVariables["CHATTER_LANGUAGES"] = string.Join(",", ChatRules.Languages);
+            info.EnvironmentVariables["PIP_CACHE_DIR"] = Path.Combine(DataDirectory, "cache", "pip");
             return info;
         }
 
@@ -156,7 +168,7 @@ namespace Chatter {
             }
         }
 
-        static void Stop(Process process) {
+        static void Stop(Process? process) {
             if (process == null) return;
             try {
                 if (process.HasExited) return;

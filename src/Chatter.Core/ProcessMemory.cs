@@ -36,8 +36,11 @@ namespace Chatter {
             IntPtr opened = NativeMethods.OpenProcess(access, false, pid);
             if (opened == IntPtr.Zero) {
                 int error = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
-                if (error == 5) throw new InvalidOperationException("Cannot read osu!stable. Run chatter with the same administrator rights as osu!.");
-                throw new InvalidOperationException("Cannot read osu!stable");
+                if (error == 5) throw new CompatibilityException(CompatibilityCode.AccessDenied, "Cannot read osu!stable. Run chatter with the same administrator rights as osu!.");
+                throw new CompatibilityException(CompatibilityCode.AccessDenied, "Cannot read osu!stable");
+            }
+            if (Environment.Is64BitOperatingSystem && (!NativeMethods.IsWow64Process(opened, out bool wow64) || !wow64)) {
+                NativeMethods.CloseHandle(opened); throw new CompatibilityException(CompatibilityCode.UnsupportedArchitecture, "Chatter requires the 32-bit osu!stable client.");
             }
             handle = opened;
             Pid = pid;
@@ -51,7 +54,7 @@ namespace Chatter {
             Pid = 0;
         }
 
-        public byte[] ReadBytes(uint address, int size) {
+        public byte[]? ReadBytes(uint address, int size) {
             if (handle == IntPtr.Zero || address == 0 || size <= 0 || size > 8 * 1024 * 1024) return null;
             var buffer = new byte[size];
             int read;
@@ -80,7 +83,7 @@ namespace Chatter {
                 while (off < region) {
                     uint start = off > 128 ? off - 128 : 0;
                     int count = (int)Math.Min(65536u + 128u, region - start);
-                    byte[] buf = ReadBytes(regionBase + start, count);
+                    byte[]? buf = ReadBytes(regionBase + start, count);
                     if (buf != null) visit(buf);
                     off += 65536;
                 }
@@ -91,7 +94,8 @@ namespace Chatter {
             var found = new Dictionary<string, uint>();
             if (handle == IntPtr.Zero || patterns == null || patterns.Length == 0) return found;
             uint address = 0;
-            while (found.Count < patterns.Length) {
+            var operands = new Dictionary<string, uint>();
+            while (true) {
                 NativeMethods.MemoryBasicInformation info;
                 int got = NativeMethods.VirtualQueryEx(handle, new IntPtr(unchecked((int)address)), out info, System.Runtime.InteropServices.Marshal.SizeOf(typeof(NativeMethods.MemoryBasicInformation)));
                 if (got == 0) break;
@@ -109,16 +113,24 @@ namespace Chatter {
                 int longest = 0;
                 for (int p = 0; p < patterns.Length; p++) if (patterns[p].Bytes.Length > longest) longest = patterns[p].Bytes.Length;
                 uint off = 0;
-                while (off < region && found.Count < patterns.Length) {
+                while (off < region) {
                     int count = (int)Math.Min((uint)longest + 65536u, region - off);
-                    byte[] buf = ReadBytes(regionBase + off, count);
+                    byte[]? buf = ReadBytes(regionBase + off, count);
                     if (buf != null) {
                         for (int p = 0; p < patterns.Length; p++) {
-                            if (found.ContainsKey(patterns[p].Name)) continue;
-                            int at = IndexOf(buf, patterns[p]);
-                            if (at < 0) continue;
-                            long abs = (long)regionBase + off + at + patterns[p].Offset;
-                            if (abs > 0 && abs < uint.MaxValue) found[patterns[p].Name] = (uint)abs;
+                            var pattern = patterns[p];
+                            for (int at = 0; at <= buf.Length - pattern.Bytes.Length; at++) {
+                                if (!pattern.Matches(buf, at)) continue;
+                                long abs = (long)regionBase + off + at + pattern.Offset;
+                                if (abs <= 0 || abs >= uint.MaxValue) continue;
+                                byte[]? word = ReadBytes((uint)abs, 4); if (word == null) continue;
+                                uint operand = BitConverter.ToUInt32(word, 0);
+                                if (operand < 0x10000 || operand >= 0x7fff0000) continue;
+                                if (operands.TryGetValue(pattern.Name, out uint previous) && previous != operand)
+                                    throw new CompatibilityException(CompatibilityCode.AmbiguousSignature, "This osu!stable build has ambiguous account signatures. Update the compatibility profile.");
+                                operands[pattern.Name] = operand;
+                                if (!found.ContainsKey(pattern.Name)) found[pattern.Name] = (uint)abs;
+                            }
                         }
                     }
                     off += 65536;

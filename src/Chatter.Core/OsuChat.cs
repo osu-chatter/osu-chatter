@@ -10,7 +10,7 @@ namespace Chatter {
         uint root;
         int failures;
         DateTime retryAt = DateTime.MinValue;
-        Dictionary<string, uint> bases;
+        Dictionary<string, uint>? bases;
         StableAccountSnapshot account = StableAccountSnapshot.Unavailable;
 
         static readonly Pattern[] ProfilePatterns = {
@@ -23,17 +23,19 @@ namespace Chatter {
             lock (gate) {
                 Prepare();
                 RefreshProfile();
-                ChatSnapshot snap = ChatGraph.Read(memory, root, memory.Pid, account.Name);
+                ChatSnapshot? snap = ChatGraph.Read(memory, root, memory.Pid, account.Name);
                 if (snap == null) {
                     failures++;
                     if (failures >= 3) {
                         root = 0;
                         retryAt = DateTime.MinValue;
                     }
-                    throw new InvalidOperationException("Chat changed while reading; retrying");
+                    throw new CompatibilityException(CompatibilityCode.ChatChanged, "Chat changed while reading; retrying");
                 }
                 failures = 0;
-                return new ChatSnapshot(snap.Session, account.Connected, account.Name, snap.Channels, account.Id);
+                int? state = StableAccountReader.GameState(memory, bases);
+                return new ChatSnapshot(snap.Session, account.Connected, account.Name, snap.Channels, account.Id,
+                    state.HasValue && Stable.MenuOrLobby(state.Value));
             }
         }
 
@@ -61,12 +63,12 @@ namespace Chatter {
                 retryAt = DateTime.MinValue;
                 failures = 0;
                 int pid = ProcessMemory.FindOsu();
-                if (pid == 0) throw new InvalidOperationException("Open osu!stable to read chat");
+                if (pid == 0) throw new CompatibilityException(CompatibilityCode.NotRunning, "Open osu!stable to read chat");
                 memory.Open(pid, NativeMethods.ProcessVmRead | NativeMethods.ProcessQueryInformation);
             }
             if (root != 0) return;
             if (retryAt != DateTime.MinValue && DateTime.UtcNow - retryAt < TimeSpan.FromSeconds(5))
-                throw new InvalidOperationException("Open chat in osu!stable; waiting for supported chat data");
+                throw new CompatibilityException(CompatibilityCode.WaitingForChat, "Open chat in osu!stable; waiting for supported chat data");
             retryAt = DateTime.UtcNow;
             var found = new SortedSet<uint>();
             memory.VisitExecutable(delegate(byte[] code) {
@@ -76,7 +78,7 @@ namespace Chatter {
                 }
             });
             if (found.Count != 1)
-                throw new InvalidOperationException("Open chat in osu!stable; this client may need a chat-reader update");
+                throw new CompatibilityException(CompatibilityCode.UnsupportedLayout, "Open chat in osu!stable; this client may need a chat-reader update");
             foreach (uint item in found) { root = item; break; }
         }
 
@@ -97,11 +99,11 @@ namespace Chatter {
         public int Pid { get; }
         public int Account { get; }
 
-        public bool Equals(PlayerIdentity other) {
+        public bool Equals(PlayerIdentity? other) {
             return other != null && Pid == other.Pid && Account == other.Account;
         }
 
-        public override bool Equals(object obj) { return Equals(obj as PlayerIdentity); }
+        public override bool Equals(object? obj) { return Equals(obj as PlayerIdentity); }
         public override int GetHashCode() { return Pid * 397 ^ Account; }
     }
 }

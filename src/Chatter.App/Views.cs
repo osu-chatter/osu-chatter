@@ -10,7 +10,7 @@ using Chatter;
 
 namespace Chatter.App {
     sealed class ChannelRow {
-        public string Name;
+        public string Name = "";
         public bool Private;
         public int Unread;
         public bool Selected;
@@ -19,19 +19,24 @@ namespace Chatter.App {
 
     sealed class ChannelRail : Control {
         readonly List<ChannelRow> rows = new List<ChannelRow>();
-        int hover = -1;
-        public event Action<string> Chosen;
+        int hover = -1, railScroll;
+        public event Action<string>? Chosen;
         public string Status = "Looking for osu!";
         public Color StatusColor = Palette.Faint;
         public string Account = "";
 
+        int Px(int value) => (int)Math.Round(value * DeviceDpi / 96.0);
         public ChannelRail() {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Palette.Sidebar;
-            Width = 252;
+            Width = Px(252);
         }
 
         public void SetRows(IList<ChannelRow> next) {
+            if (next != null && next.Count == rows.Count) {
+                bool same = true; for (int i = 0; i < next.Count; i++) if (rows[i].Name != next[i].Name || rows[i].Selected != next[i].Selected || rows[i].Unread != next[i].Unread || rows[i].Private != next[i].Private) { same = false; break; }
+                if (same) return;
+            }
             rows.Clear();
             if (next != null) rows.AddRange(next);
             Invalidate();
@@ -40,22 +45,24 @@ namespace Chatter.App {
         protected override void OnPaint(PaintEventArgs e) {
             var g = e.Graphics;
             g.Clear(Palette.Sidebar);
-            TextRenderer.DrawText(g, "chatter", UiFont.Title, new Rectangle(20, 18, Width - 32, 28), Palette.Ink, PaintKit.Single);
+            TextRenderer.DrawText(g, "chatter", UiFont.Title, new Rectangle(Px(20), Px(18), Width - Px(32), Px(28)), Palette.Ink, PaintKit.Single);
             var dot = StatusColor;
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             using (var brush = new SolidBrush(dot))
-                g.FillEllipse(brush, 22, 52, 7, 7);
+                g.FillEllipse(brush, Px(22), Px(52), Px(7), Px(7));
             string status = string.IsNullOrEmpty(Account) ? Status : Status + "  ·  " + Account;
-            TextRenderer.DrawText(g, status, UiFont.Small, new Rectangle(36, 46, Width - 48, 18), Palette.Muted, PaintKit.Single);
+            TextRenderer.DrawText(g, status, UiFont.Small, new Rectangle(Px(36), Px(46), Width - Px(48), Px(18)), Palette.Muted, PaintKit.Single);
             using (var pen = new Pen(Palette.Line))
                 g.DrawLine(pen, Width - 1, 0, Width - 1, Height);
 
             foreach (var row in rows) row.Bounds = Rectangle.Empty;
-            int y = 84;
+            var clip = g.Save(); g.SetClip(new Rectangle(0, Px(78), Width, Math.Max(1, Height - Px(148))));
+            int y = Px(84) - railScroll;
             y = Section(g, "Channels", y, false);
             y = Section(g, "Direct", y, true);
+            g.Restore(clip);
             if (rows.Count == 0) {
-                TextRenderer.DrawText(g, "Open chats show up here.", UiFont.Small, new Rectangle(20, 92, Width - 40, 36), Palette.Faint, PaintKit.Wrap);
+                TextRenderer.DrawText(g, "Open chats show up here.", UiFont.Small, new Rectangle(Px(20), Px(92), Width - Px(40), Px(36)), Palette.Faint, PaintKit.Wrap);
             }
         }
 
@@ -63,27 +70,33 @@ namespace Chatter.App {
             bool any = false;
             for (int i = 0; i < rows.Count; i++) if (rows[i].Private == privat) any = true;
             if (!any) return y;
-            TextRenderer.DrawText(g, title.ToUpperInvariant(), UiFont.Section, new Rectangle(20, y, Width - 40, 18), Palette.Faint, PaintKit.Single);
-            y += 22;
+            TextRenderer.DrawText(g, title.ToUpperInvariant(), UiFont.Section, new Rectangle(Px(20), y, Width - Px(40), Px(18)), Palette.Faint, PaintKit.Single);
+            y += Px(22);
             for (int i = 0; i < rows.Count; i++) {
                 if (rows[i].Private != privat) continue;
                 var row = rows[i];
-                if (y > Height - 76) break;
-                var bounds = new Rectangle(10, y, Width - 22, 36);
-                row.Bounds = bounds;
-                if (row.Selected || i == hover) PaintKit.FillRound(g, bounds, 8, row.Selected ? Palette.Elevated : Color.FromArgb(28, 31, 38));
-                int textWidth = bounds.Width - 28;
-                if (row.Unread > 0) textWidth -= 32;
-                TextRenderer.DrawText(g, row.Name, row.Selected ? UiFont.BodyStrong : UiFont.Body, new Rectangle(bounds.X + 12, bounds.Y, textWidth, bounds.Height), row.Selected ? Palette.Ink : Palette.Muted, PaintKit.Single);
+                // Keep layout for every row; clipping handles off-screen conversations.
+                var bounds = new Rectangle(Px(10), y, Width - Px(22), Px(36));
+                row.Bounds = bounds.Top >= Px(78) && bounds.Bottom <= Height - Px(70) ? bounds : Rectangle.Empty;
+                if (row.Selected || i == hover) PaintKit.FillRound(g, bounds, Px(8), row.Selected ? Palette.Elevated : Color.FromArgb(Px(28), Px(31), Px(38)));
+                int textWidth = bounds.Width - Px(28);
+                if (row.Unread > 0) textWidth -= Px(32);
+                TextRenderer.DrawText(g, row.Name, row.Selected ? UiFont.BodyStrong : UiFont.Body, new Rectangle(bounds.X + Px(12), bounds.Y, textWidth, bounds.Height), row.Selected ? Palette.Ink : Palette.Muted, PaintKit.Single);
                 if (row.Unread > 0) {
                     string badge = Math.Min(row.Unread, 99).ToString();
-                    var badgeRect = new Rectangle(bounds.Right - 36, bounds.Y + 8, 26, 20);
-                    PaintKit.FillRound(g, badgeRect, 10, Palette.Accent);
+                    var badgeRect = new Rectangle(bounds.Right - Px(36), bounds.Y + Px(8), Px(26), Px(20));
+                    PaintKit.FillRound(g, badgeRect, Px(10), Palette.Accent);
                     TextRenderer.DrawText(g, badge, UiFont.Small, badgeRect, Color.White, PaintKit.Single | TextFormatFlags.HorizontalCenter);
                 }
-                y += 40;
+                y += Px(40);
             }
-            return y + 8;
+            return y + Px(8);
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e) {
+            int fullHeight = rows.Count * Px(40) + Px(70);
+            railScroll = Math.Max(0, Math.Min(Math.Max(0, fullHeight - Math.Max(0, Height - Px(148))), railScroll - e.Delta));
+            Invalidate();
         }
 
         protected override void OnMouseMove(MouseEventArgs e) {
@@ -111,7 +124,7 @@ namespace Chatter.App {
         }
     }
 
-    sealed class TranscriptView : Control {
+    sealed partial class TranscriptView : Control {
         const int AvatarSize = 28;
         const int AvatarGap = 8;
         const int Side = 16;
@@ -119,7 +132,7 @@ namespace Chatter.App {
         static readonly Color SupporterRing = Color.FromArgb(232, 196, 122);
 
         sealed class Block {
-            public ChatMessage Message;
+            public ChatMessage Message = null!; // Every block is initialized by Relayout.
             public Rectangle Bubble;
             public Rectangle Translate;
             public bool HasTranslate;
@@ -149,7 +162,7 @@ namespace Chatter.App {
         public HashSet<string> ManualTranslations = new HashSet<string>();
         public string EmptyTitle = "";
         public string EmptyBody = "";
-        public event Action<ChatMessage> TranslateRequested;
+        public event Action<ChatMessage>? TranslateRequested;
         public Func<string, PlayerFace?>? Players;
         internal Func<string, bool>? Open;
         string hotUrl = "";
@@ -173,6 +186,7 @@ namespace Chatter.App {
             RememberManual();
             if (stick) { pinned = true; anchorId = null; }
             Relayout();
+            SyncModern(stick);
         }
 
         public void SetEmpty(string title, string body) {
@@ -184,6 +198,7 @@ namespace Chatter.App {
             contentHeight = 0;
             pinned = true;
             anchorId = null;
+            SyncModern(true);
             Invalidate();
         }
 
@@ -198,7 +213,7 @@ namespace Chatter.App {
             if (messages.Count == 0 || Width < 40) { contentHeight = 0; scroll = 0; Invalidate(); return; }
             int maxText = Math.Max(120, Math.Min(520, (int)((Width - 64) * 0.72))) - 28;
             int y = 18;
-            ChatMessage previous = null;
+            ChatMessage? previous = null;
             using (LineMeasure measure = LineMeasure.Open(this))
             for (int i = 0; i < messages.Count; i++) {
                 ChatMessage message = messages[i];
@@ -278,6 +293,7 @@ namespace Chatter.App {
                 scroll = Clamp(scroll);
             }
             anchorId = null;
+            SyncModern(true);
             Invalidate();
         }
 
@@ -319,14 +335,14 @@ namespace Chatter.App {
                 var bodyRect = new Rectangle(bubble.X + 14, bubble.Y + 10, textWidth, bubble.Height - 20);
                 TextRenderer.DrawText(g, message.Text, UiFont.Message, bodyRect, Palette.Ink, PaintKit.Direction(message.Text));
                 DrawLinkLines(g, block, bodyRect);
-                var bodySize = PaintKit.Measure(message.Text, UiFont.Message, textWidth);
+                var bodySize = PaintKit.Measure(message.Text, UiFont.Message, textWidth, PaintKit.Direction(message.Text));
                 int cursor = bodyRect.Y + bodySize.Height + 8;
                 string translated;
                 if (translations.TryGetValue(message.Id, out translated) && translated != message.Text) {
                     using (var pen = new Pen(Color.FromArgb(64, 255, 255, 255)))
                         g.DrawLine(pen, bubble.X + 14, cursor, bubble.Right - 14, cursor);
                     cursor += 6;
-                    var translationSize = PaintKit.Measure(translated, UiFont.Body, textWidth);
+                    var translationSize = PaintKit.Measure(translated, UiFont.Body, textWidth, PaintKit.Direction(translated));
                     TextRenderer.DrawText(g, translated, UiFont.Body, new Rectangle(bubble.X + 14, cursor, textWidth, translationSize.Height + 2), Color.FromArgb(214, 219, 228), PaintKit.Direction(translated));
                     cursor += translationSize.Height + 6;
                 }
@@ -335,7 +351,7 @@ namespace Chatter.App {
                     var errorSize = PaintKit.Measure(error, UiFont.Small, textWidth);
                     TextRenderer.DrawText(g, error, UiFont.Small, new Rectangle(bubble.X + 14, cursor, textWidth, errorSize.Height + 2), Color.FromArgb(254, 205, 211), PaintKit.Wrap);
                 }
-                string time = message.Time != null && message.Time.Length >= 5 ? message.Time.Substring(0, 5) : message.Time;
+                string? time = message.Time != null && message.Time.Length >= 5 ? message.Time.Substring(0, 5) : message.Time;
                 var timeRect = new Rectangle(bubble.Right - 58, bubble.Bottom - 20, 46, 16);
                 TextRenderer.DrawText(g, time, UiFont.Small, timeRect, Color.FromArgb(150, 156, 168), PaintKit.Single | TextFormatFlags.Right);
                 if (block.HasTranslate) {
@@ -359,7 +375,25 @@ namespace Chatter.App {
         }
 
         protected override void OnMouseDown(MouseEventArgs e) {
+            if (e.Button == MouseButtons.Right) {
+                var block = blocks.Find(b => new Rectangle(b.Bubble.X, b.Bubble.Y - scroll, b.Bubble.Width, b.Bubble.Height).Contains(e.Location));
+                if (block != null) {
+                    var menu = messageMenu ?? (messageMenu = new ContextMenuStrip());
+                    menu.Close();
+                    while (menu.Items.Count > 0) menu.Items[0].Dispose();
+                    menu.Items.Add("Copy message", null, delegate { Clipboard.SetText(block.Message.Text); });
+                    if (translations.TryGetValue(block.Message.Id, out string value)) menu.Items.Add("Copy translation", null, delegate { Clipboard.SetText(value); });
+                    foreach (var link in ChatLinks.Find(block.Message.Text, block.Message.Source)) { string url = link.Url; menu.Items.Add("Copy link", null, delegate { Clipboard.SetText(url); }); }
+                    menu.Items.Add("Translate again with context", null, delegate { TranslateRequested?.Invoke(block.Message); });
+                    menu.Items.Add("Translate to…", null, delegate { PickTranslationTarget(block.Message); });
+                    menu.Items.Add("Open osu! profile", null, delegate { var face = FaceOf(block.Message.Sender); if (face?.Id > 0) OpenExternal("https://osu.ppy.sh/users/" + face.Id); }); menu.Show(this, e.Location);
+                }
+                return;
+            }
             if (e.Button != MouseButtons.Left) return;
+            foreach (var block in blocks) if (block.ShowSender && new Rectangle(block.Bubble.X + 4, block.Bubble.Y - scroll - 18, block.Bubble.Width, 16).Contains(e.Location)) {
+                var face = FaceOf(block.Message.Sender); if (face?.Id > 0) OpenExternal("https://osu.ppy.sh/users/" + face.Id); return;
+            }
             Focus();
             for (int i = 0; i < blocks.Count; i++) {
                 if (!blocks[i].HasTranslate) continue;
@@ -420,7 +454,7 @@ namespace Chatter.App {
             Invalidate();
         }
 
-        string anchorId;
+        string? anchorId;
         int anchorOffset;
         bool lastShowTranslate;
 
@@ -456,10 +490,12 @@ namespace Chatter.App {
             return true;
         }
 
-        static bool SameValues(Dictionary<string, string> a, Dictionary<string, string> b) {
-            if (b == null) return a.Count == 0;
-            if (a.Count != b.Count) return false;
-            foreach (var pair in a) if (!b.TryGetValue(pair.Key, out var value) || value != pair.Value) return false;
+        bool SameValues(Dictionary<string, string> a, Dictionary<string, string> b) {
+            foreach (var message in messages) {
+                bool before = a.TryGetValue(message.Id, out string previous);
+                bool after = b != null && b.TryGetValue(message.Id, out _);
+                if (before != after || (before && b != null && b[message.Id] != previous)) return false;
+            }
             return true;
         }
 

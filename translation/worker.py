@@ -7,7 +7,7 @@ import sys
 
 root = Path(__file__).resolve().parent
 for name, path in {
-    'XDG_DATA_HOME': root / 'data', 'XDG_CONFIG_HOME': root / 'config',
+    'XDG_DATA_HOME': (root.parent / 'translator-v1' / 'data') if (root.parent / 'translator-v1' / 'data').exists() else root / 'data', 'XDG_CONFIG_HOME': root / 'config',
     'XDG_CACHE_HOME': root / 'cache', 'HF_HOME': root / 'cache' / 'huggingface',
 }.items():
     path.mkdir(parents=True, exist_ok=True)
@@ -29,9 +29,10 @@ def emit(**value):
 with open(os.devnull, 'w') as quiet, contextlib.redirect_stdout(quiet), contextlib.redirect_stderr(quiet):
     import argostranslate.package as package
     import argostranslate.translate as translate
-    from libretranslate.detect import Detector
+    from langdetect import detect, DetectorFactory
+    DetectorFactory.seed = 0
     codes = tuple(os.environ['CHATTER_LANGUAGES'].split(','))
-    detector = Detector(codes)
+    # Deterministic detector; explicit script/channel hints arrive from the app.
     emit(ready=True)
     available = None
 
@@ -52,8 +53,30 @@ with open(os.devnull, 'w') as quiet, contextlib.redirect_stdout(quiet), contextl
         try:
             request = json.loads(line)
             text, source, target = request['text'], request['source'], request['target']
+            if request.get('preload'):
+                if source not in codes or target not in codes:
+                    raise ValueError('Unsupported language pair.')
+                for a, b in ((source, 'en'), ('en', target)):
+                    if a != b:
+                        ensure_pair(a, b)
+                emit(translatedText='Models are ready.')
+                continue
+            if not any(c.isalpha() for c in text):
+                emit(translatedText=text)
+                continue
             if source == 'auto':
-                source = detector.detect(text)[0].code
+                try:
+                    source = detect(text)
+                except Exception:
+                    emit(translatedText=text)
+                    continue
+                source = {'zh-cn': 'zh', 'zh-tw': 'zh', 'iw': 'he'}.get(source, source)
+                # Short informal Cyrillic is frequently misclassified by statistical detectors.
+                if any('\u0400' <= c <= '\u04ff' for c in text) and source not in ('ru', 'uk'):
+                    source = 'uk' if any(c in text.lower() for c in 'іїєґ') else 'ru'
+            if source not in codes and request['source'] == 'auto':
+                emit(translatedText=text)
+                continue
             if source not in codes or target not in codes or len(text.encode('utf-8')) > 8192:
                 raise ValueError('Unsupported translation request.')
             if source == target or not any(c.isalpha() for c in text):

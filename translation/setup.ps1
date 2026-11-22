@@ -1,4 +1,4 @@
-﻿# Private runtime: no system Python, PATH changes, service registration or admin rights
+# Private runtime: no system Python, PATH changes, service registration or admin rights
 param([Parameter(Mandatory=$true)][string]$Root)
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -68,7 +68,7 @@ try {
 } finally { $vcZip.Dispose() }
 Remove-Item -LiteralPath $vcArchive
 $verifyScript = Join-Path $Root 'verify.py'
-Set-Content -LiteralPath $verifyScript -Value 'import argostranslate.translate; from libretranslate.detect import Detector' -Encoding ASCII
+Set-Content -LiteralPath $verifyScript -Value 'import argostranslate.translate; from langdetect import detect' -Encoding ASCII
 $verify = Start-Process -FilePath $pythonExe -ArgumentList @('-I', ('"' + $verifyScript + '"')) -WindowStyle Hidden -PassThru -Wait -RedirectStandardOutput (Join-Path $Root 'verify.log') -RedirectStandardError (Join-Path $Root 'verify-error.log')
 if ($verify.ExitCode -ne 0) { throw 'The translation runtime could not load. Retry setup.' }
 Set-Content -LiteralPath $ready -Value $fingerprint -Encoding ASCII

@@ -6,18 +6,25 @@ using Chatter;
 
 namespace Chatter.App {
     sealed class DarkPicker : ComboBox {
+        internal Action<int>? ScrollRequested;
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData) { if (DroppedDown && keyData == Keys.Escape) { DroppedDown = false; return true; } return base.ProcessCmdKey(ref msg, keyData); }
+        protected override void OnMouseWheel(MouseEventArgs e) {
+            if (!DroppedDown && ScrollRequested != null) { ScrollRequested(e.Delta); if (e is HandledMouseEventArgs h) h.Handled = true; return; }
+            base.OnMouseWheel(e);
+        }
         public DarkPicker() {
             SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
             DropDownStyle = ComboBoxStyle.DropDownList;
             FlatStyle = FlatStyle.Flat;
             DrawMode = DrawMode.OwnerDrawFixed;
             ItemHeight = 24;
+            MaxDropDownItems = 16;
             BackColor = Palette.Field;
             ForeColor = Palette.Ink;
             Font = UiFont.Body;
         }
         protected override void OnPaint(PaintEventArgs e) {
-            e.Graphics.Clear(Palette.Bg);
+            PaintKit.ClearBehind(e.Graphics, this);
             var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
             PaintKit.FillRound(e.Graphics, bounds, 7, Palette.Field);
             PaintKit.StrokeRound(e.Graphics, bounds, 7, Focused ? Palette.Accent : Palette.Line);
@@ -67,14 +74,20 @@ namespace Chatter.App {
         readonly PillButton finish = new PillButton { Filled = true };
         readonly PillButton cancel = new PillButton { Caption = "Cancel" };
         readonly bool persist;
+        readonly bool showGameOverlay;
+        readonly bool translateGameChat;
+        readonly ExperienceOptions keptExperience;
         readonly Panel content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 690), BackColor = Palette.Bg };
         readonly List<ChannelPreference> keptChannels = new List<ChannelPreference>();
         bool loading;
         int previousProvider = -1;
         int previousManual = -1;
-        public AppPreferences Result { get; private set; }
+        public AppPreferences? Result { get; private set; }
         public SetupForm(AppPreferences current, bool firstRun = true, bool persist = true) {
             this.persist = persist;
+            showGameOverlay = current.ShowGameOverlay;
+            translateGameChat = current.TranslateGameChat;
+            keptExperience = current.Experience.Copy();
             Text = firstRun ? "Welcome to osu-chatter" : "Translation preferences";
             Icon = AppIcon.Create();
             Font = UiFont.Body;
@@ -92,7 +105,7 @@ namespace Chatter.App {
             Put(title, 28, 24, 560, 36);
             Put(Copy("Choose how messages are translated. Automatic translation and the Translate button can use different providers."), 28, 67, 560, 40);
             Put(Copy("AUTOMATIC TRANSLATION"), 28, 114, 560, 20);
-            provider.Items.AddRange(new object[] { "Local · private, on this PC", "DeepL API Free", "DeepL API Pro", "Custom LibreTranslate server" });
+            provider.Items.AddRange(new object[] { "Local · private, on this PC", "DeepL API Free", "DeepL API Pro", "Custom LibreTranslate server", "Local AI · install from Settings → Models", "OpenAI-compatible translation endpoint", "Chat without translation" });
             Put(provider, 28, 140, 560, 32);
             Put(detail, 28, 180, 560, 48);
             Put(keyLabel, 28, 235, 560, 20);
@@ -103,7 +116,7 @@ namespace Chatter.App {
             Put(server, 28, 333, 560, 40);
             Put(manualHeading, 28, 391, 560, 20);
             Put(manualDetail, 28, 415, 560, 36);
-            manualProvider.Items.AddRange(new object[] { "Same as automatic", "Local · private, on this PC", "DeepL API Free", "DeepL API Pro", "Custom LibreTranslate server" });
+            manualProvider.Items.AddRange(new object[] { "Same as automatic", "Local · private, on this PC", "DeepL API Free", "DeepL API Pro", "Custom LibreTranslate server", "Local AI", "OpenAI-compatible endpoint", "No translation" });
             Put(manualProvider, 28, 455, 560, 32);
             manualKey.Input.UseSystemPasswordChar = true;
             manualKey.Input.MaxLength = 512;
@@ -174,6 +187,9 @@ namespace Chatter.App {
             if (endpoint == ChatRules.LocalTranslator) return 0;
             if (endpoint == Translator.DeepLFree) return 1;
             if (endpoint == Translator.DeepLPro) return 2;
+            if (endpoint == Translator.LocalModel) return 4;
+            if (endpoint == Translator.ChatApi) return 5;
+            if (endpoint == Translator.NoTranslation) return 6;
             return 3;
         }
 
@@ -182,11 +198,14 @@ namespace Chatter.App {
             if (endpoint == ChatRules.LocalTranslator) return 1;
             if (endpoint == Translator.DeepLFree) return 2;
             if (endpoint == Translator.DeepLPro) return 3;
+            if (endpoint == Translator.LocalModel) return 5;
+            if (endpoint == Translator.ChatApi) return 6;
+            if (endpoint == Translator.NoTranslation) return 7;
             return 4;
         }
 
         void UpdateProvider(bool resetAuto = true) {
-            bool local = provider.SelectedIndex == 0;
+            bool local = provider.SelectedIndex == 0 || provider.SelectedIndex == 4 || provider.SelectedIndex == 6;
             bool custom = provider.SelectedIndex == 3;
             bool previousDeepL = previousProvider == 1 || previousProvider == 2;
             bool currentDeepL = provider.SelectedIndex == 1 || provider.SelectedIndex == 2;
@@ -207,7 +226,7 @@ namespace Chatter.App {
         }
 
         void UpdateManual(bool resetKey = true) {
-            bool sameOrLocal = manualProvider.SelectedIndex <= 1;
+            bool sameOrLocal = manualProvider.SelectedIndex <= 1 || manualProvider.SelectedIndex == 5 || manualProvider.SelectedIndex == 7;
             bool custom = manualProvider.SelectedIndex == 4;
             bool previousDeepL = previousManual == 2 || previousManual == 3;
             bool currentDeepL = manualProvider.SelectedIndex == 2 || manualProvider.SelectedIndex == 3;
@@ -221,9 +240,9 @@ namespace Chatter.App {
         }
 
         void LayoutSections() {
-            bool local = provider.SelectedIndex == 0;
+            bool local = provider.SelectedIndex == 0 || provider.SelectedIndex == 4 || provider.SelectedIndex == 6;
             bool custom = provider.SelectedIndex == 3;
-            bool manualKeyed = manualProvider.SelectedIndex > 1;
+            bool manualKeyed = manualProvider.SelectedIndex > 1 && manualProvider.SelectedIndex != 5 && manualProvider.SelectedIndex != 7;
             bool manualCustom = manualProvider.SelectedIndex == 4;
             float scale = DeviceDpi / 96f;
             Func<int, int> px = value => (int)Math.Round(value * scale);
@@ -299,6 +318,9 @@ namespace Chatter.App {
                 case 2: return Translator.DeepLFree;
                 case 3: return Translator.DeepLPro;
                 case 4: return manualServer.Input.Text.Trim();
+                case 5: return Translator.LocalModel;
+                case 6: return Translator.ChatApi;
+                case 7: return Translator.NoTranslation;
                 default: return "";
             }
         }
@@ -314,14 +336,14 @@ namespace Chatter.App {
         void SaveChoices() {
             try {
                 var choices = new AppPreferences {
-                    Endpoint = provider.SelectedIndex == 0 ? ChatRules.LocalTranslator : provider.SelectedIndex == 1 ? Translator.DeepLFree : provider.SelectedIndex == 2 ? Translator.DeepLPro : server.Input.Text.Trim(),
+                    Endpoint = provider.SelectedIndex == 4 ? Translator.LocalModel : provider.SelectedIndex == 5 ? Translator.ChatApi : provider.SelectedIndex == 6 ? Translator.NoTranslation : provider.SelectedIndex == 0 ? ChatRules.LocalTranslator : provider.SelectedIndex == 1 ? Translator.DeepLFree : provider.SelectedIndex == 2 ? Translator.DeepLPro : server.Input.Text.Trim(),
                     ApiKey = provider.SelectedIndex == 0 ? "" : key.Input.Text.Trim(),
                     ManualEndpoint = ManualEndpoint(),
                     ManualApiKey = manualProvider.SelectedIndex <= 1 ? "" : manualKey.Input.Text.Trim(),
                     IncomingLanguage = incoming.SelectedIndex >= 0 ? ChatRules.Languages[incoming.SelectedIndex] : "",
                     OutgoingSource = writing.SelectedIndex >= 0 ? ChatRules.Languages[writing.SelectedIndex] : "en",
                     OutgoingLanguage = outgoing.SelectedIndex == 0 ? "channel" : outgoing.SelectedIndex > 0 ? ChatRules.Languages[outgoing.SelectedIndex - 1] : "",
-                    AutoTranslateIncoming = automatic.Checked, StartReading = startReading.Checked
+                    AutoTranslateIncoming = automatic.Checked, StartReading = startReading.Checked, ShowGameOverlay = showGameOverlay, TranslateGameChat = translateGameChat, Experience = keptExperience.Copy()
                 };
                 for (int i = 0; i < keptChannels.Count; i++) choices.Remember(keptChannels[i].Copy());
                 if (provider.SelectedIndex == 3 && (choices.Endpoint == ChatRules.LocalTranslator || Translator.IsDeepL(choices.Endpoint)))

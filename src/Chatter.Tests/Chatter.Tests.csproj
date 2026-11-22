@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System.Web.Extensions" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <ProjectReference Include="..\Chatter.Core\Chatter.Core.csproj" />
     <ProjectReference Include="..\Chatter.Bridge\Chatter.Bridge.csproj" />
     <ProjectReference Include="..\Chatter.App\Chatter.App.csproj" />

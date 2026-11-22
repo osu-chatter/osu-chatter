@@ -20,6 +20,7 @@ namespace Chatter.Tests {
 
         [STAThread]
         static int Main(string[] args) {
+            System.Windows.Forms.Application.SetUnhandledExceptionMode(System.Windows.Forms.UnhandledExceptionMode.ThrowException);
             if (IntPtr.Size != 4) {
                 Console.WriteLine("tests must run as 32-bit");
                 return 2;
@@ -27,7 +28,16 @@ namespace Chatter.Tests {
             if (args.Length == 1 && args[0] == "--stub-missing") Environment.Exit(RunMissing());
             if (args.Length == 1 && args[0] == "--stub-call") Environment.Exit(RunCall());
             if (args.Length == 1 && args[0] == "--live") return Live();
+            if (args.Length == 1 && args[0] == "--native-live") { Run("native display on running osu!", NativeChatTests.Live); return failed == 0 ? 0 : 1; }
             if (args.Length == 1 && args[0] == "--translation-live") { Run("local translation", UiTests.LocalTranslation); return failed == 0 ? 0 : 1; }
+            if (args.Length == 1 && args[0] == "--install-model") { Run("local AI install and fixtures", () => ReleaseCandidateTests.InstallModel()); return failed == 0 ? 0 : 1; }
+            if (args.Length == 1 && args[0] == "--install-quality-model") { Run("quality local AI fixtures", () => ReleaseCandidateTests.InstallModel(true)); return failed == 0 ? 0 : 1; }
+            if (args.Length == 1 && args[0] == "--commands-live") { Run("native command hook validation", ReleaseCandidateTests.CommandsLive); return failed == 0 ? 0 : 1; }
+            if (args.Length == 1 && args[0] == "--modern-transcript-test") { Run("modern transcript integration", ModernTranscriptTests.Run); return failed == 0 ? 0 : 1; }
+            if (args.Length == 1 && args[0] == "--transcript-menu-test") { Run("translation target menu lifecycle", TranscriptMenuTests.TranslationTargets); return failed == 0 ? 0 : 1; }
+            if (args.Length == 2 && args[0] == "--settings-shots") { Run("settings screenshots", () => SettingsTests.Render(args[1])); return failed == 0 ? 0 : 1; }
+            if (args.Length == 2 && args[0] == "--inspect-commands-live") { Run("native command state (no send)", () => NativeBridgeInspection.Run(args[1])); return failed == 0 ? 0 : 1; }
+            if (args.Length == 2 && args[0] == "--inspect-client-version") { Run("installed client version (configuration only)", () => StableVersionTests.InspectConfiguration(args[1])); return failed == 0 ? 0 : 1; }
             RunInterfaceChecks();
             RunChatReadChecks();
             RunTranslationChecks();
@@ -39,11 +49,18 @@ namespace Chatter.Tests {
         }
 
         static void RunInterfaceChecks() {
+            Run("chat input deletes words with Ctrl+Backspace", UiTests.DeletePreviousWord);
+            Run("embedded settings preserve chat draft", SettingsTests.Embedded);
+            Run("inline provider settings and credential isolation", SettingsTests.Providers);
+            Run("lazy settings and background model inventory", SettingsTests.LazyPages);
             Run("transcript keeps its place", UiTests.Transcript);
+            Run("translation target menu lifecycle", TranscriptMenuTests.TranslationTargets);
             Run("conversation refresh keeps selection", UiTests.Refresh);
             Run("rounded controls match their parent", UiTests.RoundedControls);
             Run("profile pictures and chat links", UiTests.Profiles);
             Run("listening underlines track the title", UiTests.LinkLines);
+            Run("game overlay keeps original messages", UiTests.GameOverlay);
+            Run("game reply preview and submit are separate", UiTests.GameReply);
         }
 
         static void RunChatReadChecks() {
@@ -60,6 +77,9 @@ namespace Chatter.Tests {
             Run("chat layout mutation safeguards", CompatibilityTests.GraphConsistency);
             Run("fresh account layout reads", CompatibilityTests.AccountReads);
             Run("reader and bridge share one profile", CompatibilityTests.SharedProfile);
+            Run("game version parsing", StableVersionTests.Parsing);
+            Run("game version live configuration structure", StableVersionTests.Memory);
+            Run("game version configuration fallback", StableVersionTests.ConfigurationFiles);
         }
 
         static void RunTranslationChecks() {
@@ -80,11 +100,21 @@ namespace Chatter.Tests {
             Run("account identity", RuleTests.Account);
             Run("unread messages", RuleTests.Unread);
             Run("channel language", RuleTests.Language);
+            Run("bounded context and source hints", ReleaseCandidateTests.ContextAndHints);
+            Run("release settings persistence", ReleaseCandidateTests.AdvancedPreferences);
+            Run("chat translation endpoint, links and cache", ReleaseCandidateTests.ChatApiAndCache);
+            Run("translation progress keeps transcript stable", ReleaseCandidateTests.StableProgress);
+            Run("native command capture and unpatch", ReleaseCandidateTests.CommandHook);
+            Run("replacement command hook survives old cleanup", ReleaseCandidateTests.ReplacedCommandHook);
         }
 
         static void RunBridgeChecks() {
             Run("bridge payload", StubTests.Image);
+            Run("bridge upgrades use a new CLR identity", BridgeUpgradeTests.Identity);
             Run("bridge protocol", BridgeProtocolTests.RunAll);
+            Run("native display protocol and expiry", BridgeProtocolTests.NativeDisplay);
+            Run("native command polling and stop protocol", BridgeProtocolTests.NativeCommands);
+            Run("native display batching preserves originals", NativeChatTests.Batch);
             Run("bridge handles a missing module", delegate { StubProcess("--stub-missing", 1); });
             Run("bridge calls managed code", delegate { StubProcess("--stub-call", 42); });
         }
@@ -95,7 +125,7 @@ namespace Chatter.Tests {
                 Console.WriteLine("ok  " + name);
             } catch (Exception ex) {
                 failed++;
-                Console.WriteLine("FAIL " + name + ": " + ex.Message);
+                Console.WriteLine("FAIL " + name + ": " + ex);
             }
         }
 
@@ -149,7 +179,9 @@ namespace Chatter.Tests {
                     ChatSnapshot snap = chat.Read();
                     int messages = 0;
                     for (int i = 0; i < snap.Channels.Count; i++) messages += snap.Channels[i].Messages.Count;
-                    Console.WriteLine("live tabs=" + snap.Channels.Count + " messages=" + messages + " connected=" + (snap.Connected.HasValue ? snap.Connected.Value.ToString() : "unknown"));
+                    Console.WriteLine("live tabs=" + snap.Channels.Count + " messages=" + messages
+                        + " connected=" + (snap.Connected.HasValue ? snap.Connected.Value.ToString() : "unknown")
+                        + " menuOrLobby=" + snap.MenuOrLobby);
                     return snap.Channels.Count > 0 ? 0 : 1;
                 }
             } catch (Exception ex) {
@@ -164,7 +196,7 @@ namespace Chatter.Tests {
 
         public static void Unicode() {
             Fixture fixture = Sample();
-            ChatSnapshot snap = ChatGraph.Read(fixture, Root, 42, "Test User");
+            ChatSnapshot? snap = ChatGraph.Read(fixture, Root, 42, "Test User");
             if (snap == null || snap.Channels.Count != 1) throw new InvalidOperationException("channels");
             ChatChannel channel = snap.Channels[0];
             if (channel.Name != "#korean" || channel.Private || !channel.Selected) throw new InvalidOperationException("channel");
@@ -191,9 +223,9 @@ namespace Chatter.Tests {
 
         public static void SenderLabel() {
             Fixture fixture = Sample();
-            string time = ChatGraph.Read(fixture, Root, 1, "Test User").Channels[0].Messages[1].Time;
+            string? time = ChatGraph.Read(fixture, Root, 1, "Test User")!.Channels[0].Messages[1].Time;
             fixture.SetString(0x21200, time.Substring(0, 5) + " Test_User:");
-            ChatMessage message = ChatGraph.Read(fixture, Root, 1, "Test User").Channels[0].Messages[1];
+            ChatMessage message = ChatGraph.Read(fixture, Root, 1, "Test User")!.Channels[0].Messages[1];
             if (message.Sender != "Test_User" || !message.Outgoing) throw new InvalidOperationException("label");
         }
 
@@ -201,16 +233,16 @@ namespace Chatter.Tests {
             Fixture fixture = Sample();
             fixture.SetString(0x12100, "Other User");
             fixture.List(0x13000, 0x13100, new uint[0]);
-            ChatChannel channel = ChatGraph.Read(fixture, Root, 1, "").Channels[0];
+            ChatChannel? channel = ChatGraph.Read(fixture, Root, 1, "")!.Channels[0];
             if (!channel.Private || channel.Messages.Count != 0) throw new InvalidOperationException("private");
         }
 
         public static void Identity() {
             Fixture fixture = Sample();
-            string id = ChatGraph.Read(fixture, Root, 1, "").Channels[0].Messages[0].Id;
+            string? id = ChatGraph.Read(fixture, Root, 1, "")!.Channels[0].Messages[0].Id;
             Buffer.BlockCopy(fixture.Data, 0x14000, fixture.Data, 0x19000, 0x2c);
             fixture.SetWord(0x13108, 0x19000);
-            if (ChatGraph.Read(fixture, Root, 1, "").Channels[0].Messages[0].Id != id) throw new InvalidOperationException("moved");
+            if (ChatGraph.Read(fixture, Root, 1, "")!.Channels[0].Messages[0].Id != id) throw new InvalidOperationException("moved");
         }
 
         public static void RootPattern() {
@@ -262,7 +294,7 @@ namespace Chatter.Tests {
         public bool Mutate;
         bool changed;
 
-        public byte[] ReadBytes(uint address, int size) {
+        public byte[]? ReadBytes(uint address, int size) {
             if (Mutate && address == 0x13010) {
                 bool was = changed;
                 changed = true;
@@ -418,8 +450,15 @@ namespace Chatter.Tests {
     }
 
     static class BridgeProtocolTests {
-        sealed class FakeGame : IGame {
+        sealed class FakeGame : IGame, INativeChatGame, INativeCommandGame {
             public int sent, validated;
+            public int displayed, restored;
+            public int commandPolls, commandStops;
+            public byte[] PollCommands(int account, bool take, string completed, bool success) {
+                Check(account == 42 && !take && completed == "" && success, "native command poll fields");
+                Interlocked.Increment(ref commandPolls); return new byte[] { 0 };
+            }
+            public void StopCommands() { Interlocked.Increment(ref commandStops); }
             public bool wrongAccount;
             public readonly ManualResetEvent pause = new ManualResetEvent(true);
             public void Validate(int account, string target) {
@@ -431,6 +470,13 @@ namespace Chatter.Tests {
                 if (text != "Привет 👋" || target != "Fixture") throw new Exception();
                 Interlocked.Increment(ref sent);
             }
+            public int Display(int account, string target, IDictionary<string, string> translations) {
+                Validate(account, target);
+                if (translations.Count != 1 || translations["abc-0"] != "/local display 👋") throw new Exception();
+                Interlocked.Increment(ref displayed);
+                return translations.Count;
+            }
+            public void RestoreDisplay() { Interlocked.Increment(ref restored); }
         }
 
         sealed class Fixture : IDisposable {
@@ -444,7 +490,7 @@ namespace Chatter.Tests {
                     session = new Session(name, key, process.Id, process.StartTime.ToUniversalTime().ToFileTimeUtc(), game);
                 session.Start();
             }
-            public System.IO.Pipes.NamedPipeClientStream Request(byte operation, byte[] secret = null, string text = "Привет 👋") {
+            public System.IO.Pipes.NamedPipeClientStream Request(byte operation, byte[]? secret = null, string text = "Привет 👋", byte[]? displayPayload = null) {
                 var pipe = new System.IO.Pipes.NamedPipeClientStream(".", name, System.IO.Pipes.PipeDirection.InOut, System.IO.Pipes.PipeOptions.Asynchronous);
                 pipe.Connect(2000);
                 using (var payload = new System.IO.MemoryStream()) {
@@ -452,9 +498,9 @@ namespace Chatter.Tests {
                     writer.Write(0x52424331u);
                     writer.Write(secret ?? key);
                     writer.Write(operation);
-                    writer.Write(42);
-                    byte[] target = Encoding.UTF8.GetBytes("Fixture");
-                    byte[] body = Encoding.UTF8.GetBytes(operation == 0 ? "" : text);
+                    writer.Write(operation == 3 || operation == 5 ? 0 : 42);
+                    byte[] target = Encoding.UTF8.GetBytes(operation == 3 || operation == 5 ? "" : "Fixture");
+                    byte[] body = displayPayload ?? Encoding.UTF8.GetBytes(operation == 0 || operation == 3 || operation == 5 ? "" : text);
                     writer.Write(target.Length);
                     writer.Write(target);
                     writer.Write(body.Length);
@@ -471,6 +517,23 @@ namespace Chatter.Tests {
         }
 
         static byte Status(System.IO.Stream pipe, int timeout = 3000) { return Session.Read(pipe, 1, timeout)[0]; }
+        public static void NativeCommands() {
+            using (var fixture = new Fixture()) {
+                using (var pipe = fixture.Request(4, displayPayload: new byte[] { 0, 0, 1 })) {
+                    Check(Status(pipe) == 3, "poll rejected");
+                    Check(BitConverter.ToInt32(Session.Read(pipe, 4, 1000), 0) == 1 && Session.Read(pipe, 1, 1000)[0] == 0, "empty command response");
+                }
+                Check(fixture.game.commandPolls == 1 && fixture.game.sent == 0, "poll invoked sender");
+                using (var pipe = fixture.Request(5)) Check(Status(pipe) == 3, "command stop rejected");
+                Check(fixture.game.commandStops == 1 && fixture.game.sent == 0, "stop did not remove handler");
+                using (var pipe = fixture.Request(4, displayPayload: new byte[] { 1 })) {
+                    Check(Status(pipe) == 4, "malformed command poll accepted");
+                    int size = BitConverter.ToInt32(Session.Read(pipe, 4, 1000), 0);
+                    Check(size > 0 && size <= 1600, "command error not bounded"); Session.Read(pipe, size, 1000);
+                }
+                Check(fixture.game.sent == 0, "malformed poll invoked sender");
+            }
+        }
         static void Commit(System.IO.Stream pipe, ulong nonce = 123, ulong? deadline = null) {
             var writer = new System.IO.BinaryWriter(pipe, Encoding.UTF8, true);
             writer.Write(nonce);
@@ -479,6 +542,45 @@ namespace Chatter.Tests {
         }
         static bool NoSuccess(System.IO.Stream pipe) { try { return Status(pipe) != 2; } catch { return true; } }
         static void Check(bool yes, string name) { if (!yes) throw new InvalidOperationException(name); }
+
+        static byte[] DisplayPayload(string text = "/local display 👋", int count = 1) {
+            using (var stream = new System.IO.MemoryStream()) {
+                var writer = new System.IO.BinaryWriter(stream, new UTF8Encoding(false, true), true);
+                writer.Write(count);
+                for (int i = 0; i < Math.Min(count, 2); i++) { writer.Write("abc-0"); writer.Write(text); }
+                return stream.ToArray();
+            }
+        }
+
+        public static void NativeDisplay() {
+            using (var fixture = new Fixture()) {
+                using (var pipe = fixture.Request(2, displayPayload: DisplayPayload())) {
+                    Check(Status(pipe) == 3, "native update acknowledged");
+                    Check(BitConverter.ToInt32(Session.Read(pipe, 4, 1000), 0) == 1, "render count");
+                }
+                Check(fixture.game.displayed > 0 && fixture.game.sent == 0, "display must never send");
+                Thread.Sleep(3500);
+                Check(fixture.game.restored > 0, "expired lease restores originals");
+            }
+            using (var fixture = new Fixture()) {
+                using (var pipe = fixture.Request(2, displayPayload: DisplayPayload())) { Check(Status(pipe) == 3, "native enable"); Session.Read(pipe, 4, 1000); }
+                using (var pipe = fixture.Request(3)) Check(Status(pipe) == 3, "native clear");
+                int before = fixture.game.displayed;
+                Thread.Sleep(400);
+                Check(fixture.game.restored > 0 && fixture.game.displayed == before && fixture.game.sent == 0, "clear cancels reapply");
+            }
+            foreach (byte[] invalid in new[] { DisplayPayload("bad\ntext"), DisplayPayload(count: 201), DisplayPayload(count: 2), new byte[] { 1 } }) {
+                using (var fixture = new Fixture()) using (var pipe = fixture.Request(2, displayPayload: invalid)) {
+                    Check(NoSuccess(pipe), "malformed display rejected");
+                    Check(fixture.game.displayed == 0 && fixture.game.sent == 0, "malformed display has no effect");
+                }
+            }
+            using (var fixture = new Fixture()) {
+                fixture.game.wrongAccount = true;
+                using (var pipe = fixture.Request(2, displayPayload: DisplayPayload())) Check(NoSuccess(pipe), "native account changed");
+                Check(fixture.game.displayed == 0 && fixture.game.sent == 0, "native identity guard");
+            }
+        }
 
         public static void RunAll() {
             using (var fixture = new Fixture()) using (var pipe = fixture.Request(0)) { Check(Status(pipe) == 3, "check"); Check(fixture.game.sent == 0, "check never sends"); }

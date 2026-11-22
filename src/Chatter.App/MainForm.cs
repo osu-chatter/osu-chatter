@@ -7,7 +7,7 @@ using System.Windows.Forms;
 using Chatter;
 
 namespace Chatter.App {
-    public sealed class MainForm : Form {
+    public sealed partial class MainForm : Form {
         readonly ChatService service = new ChatService();
         AppPreferences preferences;
         readonly PillButton preferencesButton = new PillButton { Caption = "Translation preferences…" };
@@ -37,17 +37,25 @@ namespace Chatter.App {
         readonly PillButton incomingButton = new PillButton { Caption = "English" };
         readonly SwitchBox auto = new SwitchBox();
         readonly PillButton check = new PillButton { Caption = "Check sender" };
+        readonly PillButton overlayButton = new PillButton { Caption = "Game overlay: Off" };
+        readonly PillButton nativeChatButton = new PillButton { Caption = "In-game translation: Off" };
+        readonly Label nativeChatHint = new Label { ForeColor = Palette.Muted, Font = UiFont.Small, BackColor = Palette.Sidebar,
+            Text = "Uses this conversation's language and auto-translate setting. Originals stay in Chatter." };
+        bool nativeUpdating, nativeWasActive;
+        string nativeError = "";
+        DateTime nativeUpdateAt = DateTime.MinValue;
         readonly PillButton pause = new PillButton { Caption = "Pause" };
         readonly PillButton settingsButton = new PillButton { Caption = "Settings" };
         readonly PillButton closeSettings = new PillButton { Caption = "Close" };
 
-        ChatSnapshot snapshot;
+        ChatSnapshot? snapshot;
         Dictionary<string, int> unread = new Dictionary<string, int>();
-        Dictionary<string, HashSet<string>> historyIds;
+        Dictionary<string, HashSet<string>>? historyIds;
         int historySession;
         string historyAccount = "";
         string selected = "";
         string readerError = "";
+        CompatibilityCode? readerCode;
         string actionError = "";
         string notice = "";
         bool reading = true;
@@ -63,6 +71,8 @@ namespace Chatter.App {
         bool suppress;
         string viewSignature = "";
         string draftCue = "";
+        GameChatOverlay? gameOverlay;
+        GameReplyForm? gameReply;
 
         public bool DemoMode { get; set; }
 
@@ -71,13 +81,15 @@ namespace Chatter.App {
         public MainForm(AppPreferences preferences) {
             this.preferences = preferences.Copy();
             profiles = new PlayerDirectory(this);
-            profiles.Changed += delegate { if (!IsDisposed) transcript.Invalidate(); };
+            profiles.Changed += delegate { if (!IsDisposed) transcript.RefreshPlayers(); };
             transcript.Players = profiles.Face;
             Text = "osu-chatter";
             Icon = AppIcon.Create();
             Font = UiFont.Body;
             BackColor = Palette.Bg;
             ForeColor = Palette.Ink;
+            AutoScaleMode = AutoScaleMode.Dpi;
+            AutoScaleDimensions = new SizeF(96, 96);
             ClientSize = new Size(1100, 720);
             MinimumSize = new Size(980, 640);
             StartPosition = FormStartPosition.CenterScreen;
@@ -85,9 +97,9 @@ namespace Chatter.App {
             KeyPreview = true;
             Build();
             service.TranslationStatus += status => Post(() => {
-                if (!preferences.UsesLocalTranslator) return;
+                if (!this.preferences.UsesLocalTranslator) return;
                 translatorStatus = status;
-                Render();
+                UpdateTranslationStatus();
             });
         }
 
@@ -105,6 +117,7 @@ namespace Chatter.App {
         protected override void OnShown(EventArgs e) {
             base.OnShown(e);
             if (!DemoMode) {
+                RestoreWindowPlacement();
                 ApplyPreferences();
                 reading = preferences.StartReading;
                 pause.Caption = reading ? "Pause" : "Resume";
@@ -120,22 +133,30 @@ namespace Chatter.App {
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e) {
+            System.Threading.Interlocked.Increment(ref commandGeneration);
+            SaveWindowPlacement();
+            settingsView?.Dispose(); settingsView = null;
+            tray.Dispose();
             pollGeneration++;
             translationGeneration++;
+            gameOverlay?.Dispose();
+            gameReply?.Dispose();
             service.Dispose();
             profiles.Dispose();
+            transcript.UseModern(false, preferences.Experience.MessageFontSize);
             tips.Dispose();
             base.OnFormClosed(e);
         }
 
         protected override void OnMouseWheel(MouseEventArgs e) {
+            if (settingsView != null) { base.OnMouseWheel(e); return; }
             Point point = PointToClient(Cursor.Position);
             if (transcript.Bounds.Contains(point)) transcript.ScrollBy(e.Delta);
             else base.OnMouseWheel(e);
         }
 
         protected override void OnKeyDown(KeyEventArgs e) {
-            if (e.KeyCode == Keys.Escape && settingsOpen) { settingsOpen = false; LayoutChrome(); e.Handled = true; }
+            if (e.KeyCode == Keys.Escape && settingsOpen) { CloseEmbeddedSettings(); e.Handled = true; }
             base.OnKeyDown(e);
         }
 
@@ -154,10 +175,16 @@ namespace Chatter.App {
                 if (preferences.UsesLocalTranslator) PrepareTranslator();
                 else ProbeTranslator();
             };
-            transcript.TranslateRequested += delegate(ChatMessage message) { TranslateOne(message, true); };
+            transcript.TranslateRequested += delegate(ChatMessage message) {
+                ChatChannel? channel = Current();
+                if (channel != null) RequestManual(channel, message);
+            };
+            transcript.TargetTranslationRequested += (message, target) => { var channel = Current(); if (channel != null) RequestManual(channel, message, target); };
             Controls.Add(header);
             Controls.Add(banner);
             Controls.Add(transcript);
+            Controls.Add(translationProgress);
+            composer.Controls.Add(characterCount);
 
             composer.BackColor = Palette.Bg;
             preview.AutoSize = false;
@@ -190,13 +217,13 @@ namespace Chatter.App {
             Controls.Add(composer);
 
             pause.Click += delegate { ToggleRead(); };
-            settingsButton.Click += delegate { settingsOpen = !settingsOpen; LayoutChrome(); };
+            settingsButton.Click += delegate { if (settingsView != null) CloseEmbeddedSettings(); else OpenAdvancedSettings(); };
             rail.Controls.Add(pause);
             rail.Controls.Add(settingsButton);
 
             settings.BackColor = Palette.Sidebar;
             settings.Visible = false;
-            closeSettings.Click += delegate { settingsOpen = false; LayoutChrome(); };
+            closeSettings.Click += delegate { CloseEmbeddedSettings(); };
             incomingButton.Click += delegate { PickLanguage(incomingButton, LanguagePick.Incoming); };
             auto.Toggled += delegate {
                 if (suppress || selected.Length == 0) return;
@@ -209,6 +236,11 @@ namespace Chatter.App {
                 }
             };
             check.Click += delegate { CheckSender(); };
+            overlayButton.Click += delegate {
+                preferences.ShowGameOverlay = !preferences.ShowGameOverlay;
+                SavePreferences();
+                Render();
+            };
             settings.Controls.Add(closeSettings);
             preferencesButton.Click += delegate { OpenPreferences(); };
             settings.Controls.Add(providerSummary);
@@ -216,64 +248,84 @@ namespace Chatter.App {
             settings.Controls.Add(incomingButton);
             settings.Controls.Add(auto);
             settings.Controls.Add(check);
+            settings.Controls.Add(overlayButton);
+            nativeChatButton.Click += delegate {
+                preferences.TranslateGameChat = !preferences.TranslateGameChat;
+                nativeError = "";
+                nativeUpdateAt = DateTime.MinValue;
+                SavePreferences();
+                Render();
+                KickAuto();
+            };
+            settings.Controls.Add(nativeChatButton);
+            settings.Controls.Add(nativeChatHint);
             settings.Paint += PaintSettings;
             Controls.Add(settings);
         }
 
+        int Px(int value) => (int)Math.Round(value * DeviceDpi / 96.0);
+
         void LayoutChrome() {
-            if (ClientSize.Width < 40 || ClientSize.Height < 40) return;
-            int side = 252;
+            if (ClientSize.Width < Px(40) || ClientSize.Height < Px(40)) return;
+            int side = Px(252);
             rail.SetBounds(0, 0, side, ClientSize.Height);
-            pause.SetBounds(16, ClientSize.Height - 56, 104, 34);
-            settingsButton.SetBounds(128, ClientSize.Height - 56, 108, 34);
+            pause.SetBounds(Px(16), ClientSize.Height - Px(56), Px(104), Px(34));
+            settingsButton.SetBounds(Px(128), ClientSize.Height - Px(56), Px(108), Px(34));
             int mainX = side;
             int mainW = ClientSize.Width - side;
-            int settingsW = settingsOpen ? Math.Min(320, mainW - 280) : 0;
-            settings.Visible = settingsOpen;
-            settings.SetBounds(ClientSize.Width - settingsW, 0, settingsW, ClientSize.Height);
-            if (settingsOpen) LayoutSettings(settingsW);
-            int contentW = mainW - settingsW;
-            header.SetBounds(mainX, 0, contentW, 72);
-            int top = 72;
+            // Retained bindings for conversation controls; settings itself lives in the main content area.
+            settings.Visible = false;
+            settings.SetBounds(0, 0, Px(320), ClientSize.Height); LayoutSettings(Px(320));
+            int contentW = mainW;
+            if (settingsView != null) {
+                header.Visible = transcript.Visible = composer.Visible = translationProgress.Visible = banner.Visible = false;
+                settingsView.SetBounds(mainX, 0, mainW, ClientSize.Height); settingsView.BringToFront();
+                return;
+            }
+            header.Visible = transcript.Visible = composer.Visible = translationProgress.Visible = true;
+            header.SetBounds(mainX, 0, contentW, Px(72));
+            translationProgress.SetBounds(mainX + Px(20), Px(74), Math.Max(Px(80), contentW - Px(40)), Px(22));
+            int top = Px(100);
             if (banner.Visible) {
-                banner.SetBounds(mainX, top, contentW, 44);
-                top += 44;
+                banner.SetBounds(mainX, top, contentW, Px(44));
+                top += Px(44);
             }
             int composerH = ComposerHeight();
             composer.SetBounds(mainX, ClientSize.Height - composerH, contentW, composerH);
             LayoutComposer();
-            transcript.SetBounds(mainX, top, contentW, Math.Max(80, ClientSize.Height - composerH - top));
-            settings.BringToFront();
+            transcript.SetBounds(mainX, top, contentW, Math.Max(Px(80), ClientSize.Height - composerH - top));
+
             pause.BringToFront();
             settingsButton.BringToFront();
         }
 
-        int ComposerHeight() => (preview.Visible ? 36 : 12) + 108;
+        int ComposerHeight() => (preview.Visible ? Px(36) : Px(12)) + Px(128);
 
         void LayoutComposer() {
             int width = composer.Width;
-            int draftY = preview.Visible ? 36 : 12;
-            int captionY = draftY + 46;
-            int buttonY = captionY + 16;
-            preview.SetBounds(20, 8, Math.Max(40, width - 40), 22);
-            draft.SetBounds(16, draftY, Math.Max(80, width - 32), 42);
-            const int margin = 16;
-            const int gap = 8;
-            const int sendW = 76;
-            const int previewW = 84;
-            const int swapW = 34;
-            const int buttonH = 34;
+            characterCount.SetBounds(Px(20), composer.Height - Px(21), Math.Max(Px(80), width - Px(40)), Px(18));
+            int draftY = preview.Visible ? Px(36) : Px(12);
+            int captionY = draftY + Px(46);
+            int buttonY = captionY + Px(16);
+            preview.SetBounds(Px(20), Px(8), Math.Max(Px(40), width - Px(40)), Px(22));
+            draft.SetBounds(Px(16), draftY, Math.Max(Px(80), width - Px(32)), Px(42));
+            int margin = Px(16);
+            int gap = Px(8);
+            int sendW = Px(76);
+            int previewW = Px(84);
+            int swapW = Px(34);
+            int buttonH = Px(34);
             int right = width - margin;
             send.SetBounds(right - sendW, buttonY, sendW, buttonH);
             previewButton.SetBounds(send.Left - gap - previewW, buttonY, previewW, buttonH);
             int available = Math.Max(0, previewButton.Left - gap - margin);
-            int buttonW = Math.Min(156, Math.Max(0, (available - swapW - gap * 2) / 2));
+            int buttonW = Math.Min(Px(156), Math.Max(0, (available - swapW - gap * 2) / 2));
             int pairLeft = previewButton.Left - gap - (buttonW * 2 + swapW + gap * 2);
             fromButton.SetBounds(pairLeft, buttonY, buttonW, buttonH);
             swapButton.SetBounds(fromButton.Right + gap, buttonY, swapW, buttonH);
             languageButton.SetBounds(swapButton.Right + gap, buttonY, buttonW, buttonH);
-            fromCaption.SetBounds(fromButton.Left, captionY, buttonW, 16);
-            toCaption.SetBounds(languageButton.Left, captionY, buttonW, 16);
+            fromCaption.SetBounds(fromButton.Left, captionY, buttonW, Px(16));
+            toCaption.SetBounds(languageButton.Left, captionY, buttonW, Px(16));
         }
 
         static Label LanguageCaption(string text) => new Label {
@@ -281,12 +333,15 @@ namespace Chatter.App {
         };
 
         void LayoutSettings(int width) {
-            closeSettings.SetBounds(width - 92, 18, 76, 32);
-            providerSummary.SetBounds(20, 96, width - 40, 56);
-            preferencesButton.SetBounds(20, 168, width - 40, 36);
-            incomingButton.SetBounds(20, 262, 140, 34);
-            auto.SetBounds(20, 322, 40, 22);
-            check.SetBounds(20, 424, 148, 34);
+            closeSettings.SetBounds(width - Px(92), Px(18), Px(76), Px(32));
+            providerSummary.SetBounds(Px(20), Px(96), width - Px(40), Px(56));
+            preferencesButton.SetBounds(Px(20), Px(168), width - Px(40), Px(36));
+            incomingButton.SetBounds(Px(20), Px(262), Px(140), Px(34));
+            auto.SetBounds(Px(20), Px(322), Px(40), Px(22));
+            check.SetBounds(Px(20), Px(424), Px(148), Px(34));
+            overlayButton.SetBounds(Px(20), Px(470), width - Px(40), Px(34));
+            nativeChatButton.SetBounds(Px(20), Px(512), width - Px(40), Px(34));
+            nativeChatHint.SetBounds(Px(20), Px(558), width - Px(40), Px(36));
         }
 
         void PaintSettings(object sender, PaintEventArgs e) {
@@ -294,10 +349,10 @@ namespace Chatter.App {
             g.Clear(Palette.Sidebar);
             using (var pen = new Pen(Palette.Line))
                 g.DrawLine(pen, 0, 0, 0, settings.Height);
-            TextRenderer.DrawText(g, "Settings", UiFont.Title, new Rectangle(20, 18, 180, 30), Palette.Ink, PaintKit.Single);
-            TextRenderer.DrawText(g, "Translate this conversation to", UiFont.Small, new Rectangle(20, 240, settings.Width - 40, 18), Palette.Muted, PaintKit.Single);
-            TextRenderer.DrawText(g, "Auto-translate this conversation", UiFont.Body, new Rectangle(68, 320, settings.Width - 88, 24), Palette.Ink, PaintKit.Single);
-            TextRenderer.DrawText(g, "Preview never sends. Send runs once, and only from a menu or lobby.", UiFont.Small, new Rectangle(20, 360, settings.Width - 40, 48), Palette.Faint, PaintKit.Wrap);
+            TextRenderer.DrawText(g, "Settings", UiFont.Title, new Rectangle(Px(20), Px(18), Px(180), Px(30)), Palette.Ink, PaintKit.Single);
+            TextRenderer.DrawText(g, "Translate this conversation to", UiFont.Small, new Rectangle(Px(20), Px(240), settings.Width - Px(40), Px(18)), Palette.Muted, PaintKit.Single);
+            TextRenderer.DrawText(g, "Auto-translate this conversation", UiFont.Body, new Rectangle(Px(68), Px(320), settings.Width - Px(88), Px(24)), Palette.Ink, PaintKit.Single);
+            TextRenderer.DrawText(g, "Preview never sends. Send runs once, and only from a menu or lobby.", UiFont.Small, new Rectangle(Px(20), Px(360), settings.Width - Px(40), Px(48)), Palette.Faint, PaintKit.Wrap);
         }
 
         void StartPoll() {
@@ -311,7 +366,8 @@ namespace Chatter.App {
                     } catch (Exception ex) {
                         if (generation != pollGeneration || IsDisposed) return;
                         string message = ex.Message;
-                        try { Post(delegate { if (generation == pollGeneration) ApplyError(message); }); }
+                        var code = (ex as CompatibilityException)?.Code;
+                        try { Post(delegate { if (generation == pollGeneration) { readerCode = code; ApplyError(message); } }); }
                         catch (InvalidOperationException) { return; }
                     }
                     System.Threading.Thread.Sleep(250);
@@ -320,6 +376,7 @@ namespace Chatter.App {
         }
 
         void ToggleRead() {
+            System.Threading.Interlocked.Increment(ref commandGeneration);
             reading = !reading;
             pause.Caption = reading ? "Pause" : "Resume";
             pollGeneration++;
@@ -329,8 +386,13 @@ namespace Chatter.App {
         }
 
         void Apply(ChatSnapshot next) {
-            bool same = historyIds != null && historySession == next.Session && historyAccount == next.Account;
+            bool same = historyIds != null && historySession == next.Session && historyAccount == next.Account
+                && snapshot?.AccountId == next.AccountId;
             if (!same) {
+                manualQueue.Clear();
+                baseline.Clear();
+                foreach (var room in next.Channels) foreach (var message in room.Messages) baseline.Add(message.Id);
+                translationStates.Clear();
                 translationGeneration++;
                 drafts.Clear();
                 translations.Clear();
@@ -348,12 +410,13 @@ namespace Chatter.App {
                 ids[next.Channels[i].Name] = set;
             }
             PruneTranslationState(ids);
+            NotifyNewPrivateMessages(next, same);
             unread = UnreadCounter.Count(unread, historyIds, same, selected, reading, next.Channels);
             historyIds = ids;
             historySession = next.Session;
             historyAccount = next.Account;
             snapshot = next;
-            readerError = "";
+            readerError = ""; readerCode = null;
             bool keep = false;
             if (same) for (int i = 0; i < next.Channels.Count; i++) if (next.Channels[i].Name == selected) keep = true;
             if (!keep) {
@@ -368,13 +431,14 @@ namespace Chatter.App {
             KickAuto();
         }
 
-        void PruneTranslationState(Dictionary<string, HashSet<string>> channelIds) {
+        void PruneTranslationState(Dictionary<string, HashSet<string>>? channelIds) {
             var currentIds = new HashSet<string>();
             if (channelIds != null) foreach (HashSet<string> ids in channelIds.Values) currentIds.UnionWith(ids);
             RemoveExpired(translations, currentIds);
             RemoveExpired(translationErrors, currentIds);
             manualTranslations.RemoveWhere(id => !currentIds.Contains(id));
             attempted.RemoveWhere(id => !currentIds.Contains(id));
+            RemoveExpired(translationStates, currentIds);
         }
 
         static void RemoveExpired<T>(Dictionary<string, T> cache, HashSet<string> currentIds) {
@@ -384,11 +448,9 @@ namespace Chatter.App {
         }
 
         void ApplyError(string message) {
-            bool gone = message.IndexOf("Open osu!stable to read chat", StringComparison.Ordinal) >= 0
-                || message.IndexOf("administrator", StringComparison.OrdinalIgnoreCase) >= 0;
-            bool transient = message.IndexOf("Chat changed", StringComparison.Ordinal) >= 0
-                || message.IndexOf("waiting for supported", StringComparison.Ordinal) >= 0;
-            if (transient && snapshot != null) return;
+            bool gone = readerCode == CompatibilityCode.NotRunning || readerCode == CompatibilityCode.AccessDenied;
+            bool transient = readerCode == CompatibilityCode.ChatChanged || readerCode == CompatibilityCode.WaitingForChat;
+            if (transient && snapshot != null) gameOverlay?.SetChat(0, null, false, translations, translationErrors);
             readerError = message;
             if (gone) {
                 snapshot = null;
@@ -400,7 +462,7 @@ namespace Chatter.App {
 
         void Render() {
             var rows = new List<ChannelRow>();
-            ChatChannel current = Current();
+            ChatChannel? current = Current();
             if (snapshot != null) {
                 for (int i = 0; i < snapshot.Channels.Count; i++) {
                     ChatChannel channel = snapshot.Channels[i];
@@ -411,8 +473,8 @@ namespace Chatter.App {
             }
             rail.Account = snapshot == null ? "" : snapshot.Account;
             if (!reading) { rail.Status = "Paused"; rail.StatusColor = Palette.Faint; }
-            else if (snapshot != null && snapshot.Connected == true) { rail.Status = "Live"; rail.StatusColor = Palette.Live; }
-            else if (snapshot != null && snapshot.Connected == false) { rail.Status = "Offline"; rail.StatusColor = Palette.Faint; }
+            else if (snapshot != null && snapshot?.Connected == true) { rail.Status = "Live"; rail.StatusColor = Palette.Live; }
+            else if (snapshot != null && snapshot?.Connected == false) { rail.Status = "Offline"; rail.StatusColor = Palette.Faint; }
             else if (readerError.Length > 0) { rail.Status = "Not connected"; rail.StatusColor = Palette.Faint; }
             else { rail.Status = "Looking for osu!"; rail.StatusColor = Palette.Muted; }
             rail.SetRows(rows);
@@ -424,18 +486,14 @@ namespace Chatter.App {
             } else {
                 header.TitleText = current.Name;
                 string kind = current.Private ? "Private message" : "Channel";
-                string link = snapshot.Connected == true ? "Live from osu!" : snapshot.Connected == false ? "Retained history" : "Current buffer";
+                string link = snapshot?.Connected == true ? "Live from osu!" : snapshot?.Connected == false ? "Retained history" : "Current buffer";
                 header.Subtitle = kind + "  ·  " + link;
-                header.Pill = !reading ? "Paused" : snapshot.Connected == true ? "Live" : snapshot.Connected == false ? "Offline" : "";
-                header.PillColor = snapshot.Connected == true && reading ? Palette.Live : Palette.Muted;
+                header.Pill = !reading ? "Paused" : snapshot?.Connected == true ? "Live" : snapshot?.Connected == false ? "Offline" : "";
+                header.PillColor = snapshot?.Connected == true && reading ? Palette.Live : Palette.Muted;
             }
             header.Invalidate();
 
-            if (preparingTranslator || translatorStatus.Length > 0) {
-                banner.Danger = false;
-                banner.ActionCaption = "";
-                banner.Message = translatorStatus.Length > 0 ? translatorStatus : "Preparing local translation…";
-            } else if (translatorOffline) {
+            if (translatorOffline) {
                 banner.Danger = true;
                 banner.ActionCaption = "Retry";
                 banner.Message = preferences.Endpoint == ChatRules.LocalTranslator
@@ -445,6 +503,10 @@ namespace Chatter.App {
                 banner.Danger = true;
                 banner.ActionCaption = "";
                 banner.Message = actionError;
+            } else if (nativeError.Length > 0 && preferences.TranslateGameChat) {
+                banner.Danger = true;
+                banner.ActionCaption = "";
+                banner.Message = nativeError;
             } else if (notice.Length > 0) {
                 banner.Danger = false;
                 banner.ActionCaption = "";
@@ -465,13 +527,124 @@ namespace Chatter.App {
             } else if (current.Messages.Count == 0) {
                 transcript.SetEmpty("No messages yet", "New lines in " + current.Name + " will show up here.");
             } else {
-                transcript.ShowTranslate = preferences.Endpoint.Length > 0 || !string.IsNullOrEmpty(preferences.ManualEndpoint);
+                transcript.ShowTranslate = (preferences.Endpoint.Length > 0 && preferences.Endpoint != Translator.NoTranslation) || (!string.IsNullOrEmpty(preferences.ManualEndpoint) && preferences.ManualEndpoint != Translator.NoTranslation);
                 transcript.AllowUpgrade = preferences.HasDistinctManualProvider;
                 transcript.ManualTranslations = manualTranslations;
+                transcript.Statuses = translationStates;
                 transcript.SetMessages(current.Messages, translations, translationErrors, stick);
             }
+            UpdateTranslationStatus();
+            transcript.Statuses = translationStates;
             WatchProfiles();
             RefreshActions();
+            UpdateGameOverlay();
+            UpdateNativeChat();
+            UpdateNativeCommands();
+        }
+
+        ChatChannel? GameSelectedChannel() {
+            if (snapshot == null) return null;
+            foreach (ChatChannel channel in snapshot.Channels) if (channel.Selected) return channel;
+            return null;
+        }
+
+        void UpdateNativeChat() {
+            nativeChatButton.Caption = preferences.TranslateGameChat ? "In-game translation: On" : "In-game translation: Off";
+            if (DemoMode || nativeUpdating) return;
+            ChatChannel? channel = GameSelectedChannel();
+            ChatSnapshot? observation = snapshot;
+            bool active = preferences.TranslateGameChat && reading && readerError.Length == 0
+                && observation?.MenuOrLobby == true && observation.Connected == true && observation.AccountId > 0
+                && channel != null && preferences.Experience.NativePresentation != "original" && ChannelAutoTranslate(channel.Name)
+                && channel.Name != "#highlight" && channel.Name != "#userlog";
+            if (!active && !nativeWasActive) return;
+            if (active && DateTime.UtcNow < nativeUpdateAt) return;
+            var ready = active ? NativeChatTranslations.Ready(channel!, translations, preferences.Experience.NativePresentation == "both") : new Dictionary<string, string>();
+            nativeUpdating = true;
+            nativeWasActive = active;
+            nativeUpdateAt = DateTime.UtcNow.AddSeconds(1);
+            string target = channel?.Name ?? "";
+            Task.Run(() => {
+                string error = "";
+                try {
+                    if (active) service.DisplayTranslations(observation!, target, ready);
+                    else service.RestoreDisplay();
+                } catch (Exception ex) { error = ex.Message; }
+                Post(() => {
+                    nativeUpdating = false;
+                    bool changed = nativeError != error;
+                    nativeError = error;
+                    if (changed) Render();
+                    else if (!preferences.TranslateGameChat || !reading) UpdateNativeChat();
+                });
+            });
+        }
+
+        bool ChannelAutoTranslate(string name) => preferences.FindChannel(name)?.AutoTranslate ?? preferences.AutoTranslateIncoming;
+
+        void UpdateGameOverlay() {
+            overlayButton.Caption = preferences.ShowGameOverlay ? "Game overlay: On" : "Game overlay: Off";
+            if (DemoMode || !preferences.ShowGameOverlay) {
+                gameOverlay?.Dispose();
+                gameOverlay = null;
+                gameReply?.Close();
+                return;
+            }
+            if (gameOverlay == null) {
+                gameOverlay = new GameChatOverlay();
+                gameOverlay.Configure(preferences.Experience);
+                gameOverlay.OptionsChanged += changed => {
+                    preferences.Experience.OverlayX = changed.OverlayX; preferences.Experience.OverlayY = changed.OverlayY;
+                    preferences.Experience.OverlayWidth = changed.OverlayWidth; preferences.Experience.OverlayHeight = changed.OverlayHeight;
+                    preferences.Experience.OverlayInteractive = changed.OverlayInteractive; SavePreferences();
+                };
+                gameOverlay.VisibleMessagesChanged += KickAuto;
+                gameOverlay.ReplyRequested += OpenGameReply;
+                gameOverlay.VisibleChanged += delegate { if (gameOverlay?.Visible == true) KickAuto(); };
+            }
+            ChatSnapshot? current = snapshot;
+            ChatChannel? channel = null;
+            if (reading && current?.MenuOrLobby == true && readerError.Length == 0) {
+                foreach (ChatChannel candidate in current.Channels) {
+                    if (!candidate.Selected) continue;
+                    channel = candidate;
+                    break;
+                }
+            }
+            bool canReply = channel != null && current?.Connected == true && current.AccountId > 0
+                && channel.Name != "#highlight" && channel.Name != "#userlog";
+            gameOverlay.SetChat(current?.Session ?? 0, channel, canReply, translations, translationErrors);
+        }
+
+        void OpenGameReply(Rectangle gameBounds) {
+            ChatSnapshot? current = snapshot;
+            ChatChannel? channel = gameOverlay?.Channel;
+            if (current?.Connected != true || channel == null || !reading || !current.MenuOrLobby) return;
+            if (gameReply != null) {
+                gameReply.Activate();
+                return;
+            }
+            string name = channel.Name;
+            string source = ChannelOutgoingSource(name);
+            string target = ChannelOutgoingLanguage(name);
+            var account = new PlayerIdentity(current.Session, current.AccountId);
+            AppPreferences settings = preferences.Copy();
+            var reply = new GameReplyForm(name, LanguageLabel(source), LanguageLabel(target), ChatRules.RightToLeft(source),
+                text => {
+                    var request = new TranslationRequest { Text = text, Source = source, Target = target };
+                    settings.ApplyProvider(request, false);
+                    if (settings.Experience.SendWithoutTranslation) request.Endpoint = Translator.NoTranslation;
+                    if (request.Endpoint == Translator.LocalModel || request.Endpoint == Translator.ChatApi) request.Context = TranslationContext.Recent(channel, settings.Experience.ContextMessages);
+                    return request;
+                },
+                request => Task.Run(() => service.Translate(request)),
+                request => Task.Run(() => service.TranslateAndSend(name, request, account)));
+            gameReply = reply;
+            reply.FormClosed += delegate { gameReply = null; if (gameOverlay != null) gameOverlay.ReplyWindow = IntPtr.Zero; };
+            var anchor = gameOverlay?.Bounds ?? gameBounds;
+            reply.Location = new Point(Math.Max(gameBounds.Left, Math.Min(anchor.Left, gameBounds.Right - reply.Width)), Math.Max(gameBounds.Top, Math.Min(anchor.Bottom + 8, gameBounds.Bottom - reply.Height)));
+            reply.Show();
+            if (gameOverlay != null) gameOverlay.ReplyWindow = reply.Handle;
         }
 
         void WatchProfiles() {
@@ -489,12 +662,12 @@ namespace Chatter.App {
 
         void EmptyCopy(out string title, out string body) {
             if (!reading) { title = "Reading is paused"; body = "Resume to keep watching the chats open in osu!."; return; }
-            if (readerError.IndexOf("administrator", StringComparison.OrdinalIgnoreCase) >= 0) {
+            if (readerCode == CompatibilityCode.AccessDenied) {
                 title = "Can't read osu!";
                 body = "Run chatter with the same administrator rights as osu!.";
                 return;
             }
-            if (readerError.IndexOf("Open chat", StringComparison.Ordinal) >= 0 || readerError.IndexOf("chat-reader", StringComparison.Ordinal) >= 0) {
+            if (readerCode == CompatibilityCode.WaitingForChat || readerCode == CompatibilityCode.UnsupportedLayout) {
                 title = "No open chat";
                 body = "Open a channel or a private message in osu!. Closed tabs stay hidden.";
                 return;
@@ -505,11 +678,14 @@ namespace Chatter.App {
         }
 
         void RefreshActions() {
-            ChatChannel channel = Current();
+            ChatChannel? channel = Current();
             bool hasDraft = draft.Input.Text.Trim().Length > 0;
-            bool live = snapshot != null && snapshot.Connected == true && reading;
+            if (previewedDraft != draft.Input.Text || !preview.Visible) previewTooLong = false;
+            characterCount.Text = draft.Input.TextLength + "/400 · " + (preferences.Experience.SendWithoutTranslation || preferences.Endpoint == Translator.NoTranslation ? "Sending original text" : "Enter translates and sends once");
+            bool live = snapshot != null && snapshot?.Connected == true && reading;
             bool waiting = preparingTranslator && preferences.Endpoint == ChatRules.LocalTranslator;
-            send.Enabled = !busy && !waiting && channel != null && hasDraft && live && preferences.Endpoint.Length > 0;
+            if (previewTooLong) characterCount.Text = "Translation exceeds 400 characters · shorten the draft before sending";
+            send.Enabled = !previewTooLong && !busy && !waiting && channel != null && hasDraft && live && preferences.Endpoint.Length > 0;
             previewButton.Enabled = !busy && !waiting && hasDraft && preferences.Endpoint.Length > 0;
             check.Enabled = !busy && channel != null && live;
             preferencesButton.Enabled = !busy && !preparingTranslator;
@@ -542,14 +718,16 @@ namespace Chatter.App {
             if (preview.TextAlign != align) preview.TextAlign = align;
         }
 
-        ChatChannel Current() {
+        ChatChannel? Current() {
             if (snapshot == null) return null;
             for (int i = 0; i < snapshot.Channels.Count; i++) if (snapshot.Channels[i].Name == selected) return snapshot.Channels[i];
             return null;
         }
 
         void Select(string name) {
-            if (selected == name) return;
+            bool leavingSettings = settingsView != null;
+            if (leavingSettings) CloseEmbeddedSettings(false);
+            if (selected == name) { if (leavingSettings) Render(); return; }
             selected = name;
             viewSignature = "";
             LoadChannelSettings();
@@ -580,7 +758,7 @@ namespace Chatter.App {
             incomingButton.Caption = LanguageLabel(IncomingLanguage());
             fromButton.Caption = LanguageLabel(OutgoingSource());
             languageButton.Caption = LanguageLabel(OutgoingLanguage());
-            ChannelPreference channel = preferences.FindChannel(selected);
+            ChannelPreference? channel = preferences.FindChannel(selected);
             auto.On = channel != null && channel.AutoTranslate.HasValue ? channel.AutoTranslate.Value : preferences.AutoTranslateIncoming;
             bool ready = selected.Length > 0;
             incomingButton.Enabled = ready;
@@ -592,27 +770,33 @@ namespace Chatter.App {
             suppress = false;
         }
 
-        string IncomingLanguage() {
-            ChannelPreference channel = preferences.FindChannel(selected);
+        string IncomingLanguage() => ChannelIncomingLanguage(selected);
+
+        string ChannelIncomingLanguage(string name) {
+            ChannelPreference? channel = preferences.FindChannel(name);
             if (channel != null && channel.IncomingLanguage.Length > 0) return channel.IncomingLanguage;
             return preferences.IncomingLanguage;
         }
 
-        string OutgoingLanguage() {
-            ChannelPreference channel = preferences.FindChannel(selected);
+        string OutgoingLanguage() => ChannelOutgoingLanguage(selected);
+
+        string ChannelOutgoingLanguage(string name) {
+            ChannelPreference? channel = preferences.FindChannel(name);
             if (channel != null && channel.OutgoingLanguage.Length > 0) return channel.OutgoingLanguage;
-            return preferences.OutgoingLanguage == "channel" ? ChatRules.ChannelLanguage(selected) : preferences.OutgoingLanguage;
+            return preferences.OutgoingLanguage == "channel" ? ChatRules.ChannelLanguage(name) : preferences.OutgoingLanguage;
         }
 
-        string OutgoingSource() {
-            ChannelPreference channel = preferences.FindChannel(selected);
+        string OutgoingSource() => ChannelOutgoingSource(selected);
+
+        string ChannelOutgoingSource(string name) {
+            ChannelPreference? channel = preferences.FindChannel(name);
             if (channel != null && channel.OutgoingSource.Length > 0) return channel.OutgoingSource;
             return string.IsNullOrEmpty(preferences.OutgoingSource) ? "en" : preferences.OutgoingSource;
         }
 
         bool StoreFor(string name, Action<ChannelPreference> edit) {
             if (string.IsNullOrEmpty(name)) return false;
-            ChannelPreference current = preferences.FindChannel(name);
+            ChannelPreference? current = preferences.FindChannel(name);
             var entry = current == null ? new ChannelPreference { Name = name } : current.Copy();
             edit(entry);
             if (!preferences.Remember(entry)) return false;
@@ -621,6 +805,7 @@ namespace Chatter.App {
         }
 
         static string LanguageLabel(string id) {
+            if (id == "auto") return "Automatic";
             for (int i = 0; i < ChatRules.Languages.Length; i++) if (ChatRules.Languages[i] == id) return ChatRules.LanguageNames[i];
             return "English";
         }
@@ -630,6 +815,7 @@ namespace Chatter.App {
         void PickLanguage(PillButton source, LanguagePick pick) {
             string current = pick == LanguagePick.Incoming ? IncomingLanguage() : pick == LanguagePick.Source ? OutgoingSource() : OutgoingLanguage();
             var menu = new LanguageMenu();
+            if (pick == LanguagePick.Source) menu.Add("auto", "Automatic", current == "auto");
             for (int i = 0; i < ChatRules.Languages.Length; i++)
                 menu.Add(ChatRules.Languages[i], ChatRules.LanguageNames[i], current == ChatRules.Languages[i]);
             var origin = source.PointToScreen(new Point(0, source.Height + 6));
@@ -660,7 +846,7 @@ namespace Chatter.App {
         }
 
         void SetOutgoingSource(string id) {
-            if (selected.Length == 0 || Array.IndexOf(ChatRules.Languages, id) < 0) return;
+            if (selected.Length == 0 || (id != "auto" && Array.IndexOf(ChatRules.Languages, id) < 0)) return;
             if (!StoreFor(selected, entry => entry.OutgoingSource = id)) return;
             fromButton.Caption = LanguageLabel(id);
             ApplyWritingDirection();
@@ -682,10 +868,14 @@ namespace Chatter.App {
         TranslationRequest DraftRequest(string text) {
             var request = new TranslationRequest { Text = text, Source = OutgoingSource(), Target = OutgoingLanguage() };
             preferences.ApplyProvider(request, false);
+            if (request.Endpoint == Translator.LocalModel || request.Endpoint == Translator.ChatApi) request.Context = TranslationContext.Recent(Current(), preferences.Experience.ContextMessages);
+            if (preferences.Experience.SendWithoutTranslation) request.Endpoint = Translator.NoTranslation;
             return request;
         }
 
         void ApplyPreferences() {
+            TopMost = preferences.Experience.AlwaysOnTop;
+            if (IsHandleCreated && !DemoMode) transcript.UseModern(preferences.Experience.ModernTranscript, preferences.Experience.MessageFontSize);
             providerSummary.Text = preferences.ProviderSummary();
             LoadChannelSettings();
         }
@@ -702,7 +892,7 @@ namespace Chatter.App {
                 try { result = dialog.ShowDialog(this); }
                 finally { editingPreferences = false; }
                 if (result != DialogResult.OK) { KickAuto(); return; }
-                preferences = dialog.Result;
+                preferences = dialog.Result ?? throw new InvalidOperationException("No translation settings were saved.");
             }
             preview.Visible = false;
             actionError = notice = "";
@@ -791,38 +981,67 @@ namespace Chatter.App {
         }
 
         void KickAuto() {
+            if (DemoMode) return;
             bool waiting = preparingTranslator && preferences.Endpoint == ChatRules.LocalTranslator;
-            if (editingPreferences || waiting || !reading || !auto.On || translatorOffline || preferences.Endpoint.Length == 0 || translating) return;
-            ChatChannel channel = Current();
-            if (channel == null) return;
-            for (int i = channel.Messages.Count - 1; i >= 0; i--) {
-                ChatMessage candidate = channel.Messages[i];
-                if (!candidate.Outgoing && !candidate.System && !attempted.Contains(candidate.Id)) {
-                    TranslateOne(candidate, false);
-                    return;
+            if (editingPreferences || waiting || !reading || translating) return;
+            while (manualQueue.Count > 0) {
+                var next = manualQueue.Dequeue();
+                if (snapshot == null) break;
+                foreach (var room in snapshot.Channels) if (room.Name == next.Item1)
+                    foreach (var message in room.Messages) if (message.Id == next.Item2) { TranslateOne(room, message, true, next.Item3); return; }
+            }
+            if (translatorOffline || preferences.Endpoint.Length == 0 || preferences.Endpoint == Translator.NoTranslation) return;
+            if (preferences.Endpoint == Translator.LocalModel && (!System.IO.File.Exists(preferences.Experience.ModelPath) || !System.IO.File.Exists(preferences.Experience.RuntimePath))) return;
+            var channels = new List<ChatChannel>();
+            ChatChannel? gameChannel = preferences.TranslateGameChat && snapshot?.MenuOrLobby == true ? GameSelectedChannel() : null;
+            if (gameChannel != null) channels.Add(gameChannel);
+            ChatChannel? overlayChannel = gameOverlay?.Visible == true ? gameOverlay.Channel : null;
+            if (overlayChannel != null && !channels.Contains(overlayChannel)) channels.Add(overlayChannel);
+            ChatChannel? appChannel = Current();
+            if (appChannel != null && !channels.Contains(appChannel)) channels.Add(appChannel);
+            foreach (ChatChannel channel in channels) {
+                if (!ChannelAutoTranslate(channel.Name)) continue;
+                var visible = channel == appChannel ? transcript.VisibleMessageIds() : channel == overlayChannel ? gameOverlay?.VisibleMessageIds() ?? new HashSet<string>() : new HashSet<string>();
+                int oldest = preferences.Experience.HistoryPolicy == "all" ? Math.Max(0, channel.Messages.Count - 200) : Math.Max(0, channel.Messages.Count - preferences.Experience.HistoryCount);
+                for (int pass = 0; pass < 2; pass++) for (int i = channel.Messages.Count - 1; i >= 0; i--) {
+                    ChatMessage candidate = channel.Messages[i];
+                    bool onScreen = visible.Contains(candidate.Id);
+                    if ((pass == 0) != onScreen || (i < oldest && !onScreen)) continue;
+                    if (preferences.Experience.HistoryPolicy == "new" && baseline.Contains(candidate.Id)) continue;
+                    if (!candidate.Outgoing && !candidate.System && !attempted.Contains(candidate.Id)) { TranslateOne(channel, candidate, false); return; }
                 }
             }
+            UpdateTranslationStatus();
         }
 
-        void TranslateOne(ChatMessage message, bool manual) {
+        void TranslateOne(ChatChannel channel, ChatMessage message, bool manual, string target = "") {
             if (message == null || message.System || translating) return;
             bool separate = manual && preferences.HasDistinctManualProvider;
-            string channelName = selected;
-            var request = new TranslationRequest { Text = message.Text, Source = "auto", Target = IncomingLanguage() };
+            string channelName = channel.Name;
+            var request = new TranslationRequest { Text = message.Text, Source = "auto", Target = ChannelIncomingLanguage(channelName), ProtectedSpans = ChatLinks.Find(message.Text, message.Source) };
             preferences.ApplyProvider(request, manual);
+            if (Array.IndexOf(ChatRules.Languages, target) >= 0) request.Target = target;
+            string? configuredSource = preferences.FindChannel(channelName)?.IncomingSource;
+            if (string.IsNullOrEmpty(configuredSource)) configuredSource = preferences.Experience.IncomingSource;
+            request.Source = TranslationContext.Source(message.Text, channelName, configuredSource ?? "auto");
+            if (request.Endpoint == Translator.LocalModel || request.Endpoint == Translator.ChatApi)
+                request.Context = TranslationContext.Before(channel, message.Id, preferences.Experience.ContextMessages);
             if (string.IsNullOrEmpty(request.Endpoint)) return;
             if (preparingTranslator && request.Endpoint == ChatRules.LocalTranslator) return;
             int generation = translationGeneration;
             attempted.Add(message.Id);
+            translationStates[message.Id] = "Translating";
             translating = true;
+            UpdateTranslationStatus();
             Task.Run(delegate {
                 try {
                     string text = service.Translate(request);
                     Post(delegate {
                         translating = false;
-                        if (generation != translationGeneration) { KickAuto(); return; }
+                        if (!TranslationCurrent(generation, channelName, message.Id)) { KickAuto(); return; }
                         translatorOffline = false;
                         translations[message.Id] = text;
+                        translationStates[message.Id] = text == message.Text ? "Original retained" : "Translated";
                         translationErrors.Remove(message.Id);
                         if (separate) manualTranslations.Add(message.Id);
                         else manualTranslations.Remove(message.Id);
@@ -836,12 +1055,10 @@ namespace Chatter.App {
                     try {
                         Post(delegate {
                             translating = false;
-                            if (generation != translationGeneration) { KickAuto(); return; }
+                            if (!TranslationCurrent(generation, channelName, message.Id)) { KickAuto(); return; }
+                            translationStates[message.Id] = "Failed · retry available";
                             if (separate) translationErrors[message.Id] = error;
-                            else if (offline) {
-                                translatorOffline = true;
-                                attempted.Remove(message.Id);
-                            } else {
+                            else {
                                 translationErrors[message.Id] = error;
                                 if (Translator.IsDeepL(request.Endpoint)) {
                                     StoreFor(channelName, entry => entry.AutoTranslate = false);
@@ -851,11 +1068,16 @@ namespace Chatter.App {
                             }
                             PruneTranslationState(historyIds);
                             Render();
-                            if (!separate && !offline && !Translator.IsDeepL(request.Endpoint)) KickAuto();
+                            KickAuto();
                         });
                     } catch (InvalidOperationException) { }
                 }
             });
+        }
+
+        bool TranslationCurrent(int generation, string channel, string id) {
+            return generation == translationGeneration
+                && historyIds != null && historyIds.TryGetValue(channel, out HashSet<string> ids) && ids.Contains(id);
         }
 
         void PreviewDraft() {
@@ -878,7 +1100,9 @@ namespace Chatter.App {
                         busy = false;
                         translatorOffline = false;
                         if (generation == translationGeneration && selected == previewChannel && draft.Input.Text == text && OutgoingLanguage() == language && OutgoingSource() == source) {
-                            preview.Text = translated;
+                            previewedDraft = text; previewTooLong = translated.Length > 400;
+                            preview.Text = previewTooLong ? translated.Length + "/400 characters · Shorten the draft. " + translated : translated;
+                            preview.ForeColor = previewTooLong ? Color.FromArgb(254, 205, 211) : Palette.Muted;
                             preview.Visible = true;
                             LayoutChrome();
                         }
@@ -898,7 +1122,8 @@ namespace Chatter.App {
         }
 
         void TranslateAndSend() {
-            ChatChannel channel = Current();
+            if (previewTooLong && previewedDraft == draft.Input.Text && preview.Visible) return;
+            ChatChannel? channel = Current();
             bool waiting = preparingTranslator && preferences.Endpoint == ChatRules.LocalTranslator;
             if (busy || waiting || !reading || channel == null || draft.Input.Text.Trim().Length == 0 || preferences.Endpoint.Length == 0) return;
             if (snapshot == null || snapshot.Connected != true) return;
@@ -907,6 +1132,7 @@ namespace Chatter.App {
             notice = "";
             string target = channel.Name;
             string text = draft.Input.Text;
+            lastSubmitted = text;
             RefreshActions();
             var request = DraftRequest(text);
             Task.Run(delegate {
@@ -938,7 +1164,7 @@ namespace Chatter.App {
         }
 
         void CheckSender() {
-            ChatChannel channel = Current();
+            ChatChannel? channel = Current();
             if (busy || channel == null) return;
             busy = true;
             actionError = "";
@@ -992,10 +1218,8 @@ namespace Chatter.App {
             Render();
         }
 
-        public void OpenSettings() {
-            settingsOpen = true;
-            LayoutChrome();
-        }
+        public void OpenSettings() { OpenAdvancedSettings(); }
+        internal void OpenSettingsPage(string page) { OpenAdvancedSettings(); settingsView?.SelectPage(page); }
 
         public void LoadOffline() {
             DemoMode = true;
@@ -1013,7 +1237,7 @@ namespace Chatter.App {
 
     sealed class LanguageMenu : Form {
         readonly FlowLayoutPanel stack = new FlowLayoutPanel();
-        Action<string> chosen;
+        Action<string>? chosen;
 
         public LanguageMenu() {
             FormBorderStyle = FormBorderStyle.None;

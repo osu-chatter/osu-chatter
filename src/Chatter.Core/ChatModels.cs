@@ -4,7 +4,8 @@ using Chatter.Shared;
 
 namespace Chatter {
     public sealed class ChatMessage {
-        public ChatMessage(string id, string sender, string text, string time, bool outgoing, bool system, string? source = null) {
+        public ChatMessage(string id, string sender, string text, string time, bool outgoing, bool system, string? source = null, bool action = false) {
+            Action = action;
             Id = id;
             Sender = sender;
             Text = text;
@@ -14,6 +15,7 @@ namespace Chatter {
             Source = string.IsNullOrEmpty(source) ? text : source!;
         }
 
+        public bool Action { get; }
         public string Id { get; }
         public string Sender { get; }
         public string Text { get; }
@@ -47,11 +49,17 @@ namespace Chatter {
             AccountId = accountId;
         }
 
+        internal ChatSnapshot(int session, bool? connected, string account, IReadOnlyList<ChatChannel> channels, int accountId, bool menuOrLobby)
+            : this(session, connected, account, channels, accountId) {
+            MenuOrLobby = menuOrLobby;
+        }
+
         public int Session { get; }
         public bool? Connected { get; }
         public string Account { get; }
         public IReadOnlyList<ChatChannel> Channels { get; }
         public int AccountId { get; }
+        public bool MenuOrLobby { get; }
     }
 
     public sealed class SendReceipt {
@@ -65,7 +73,7 @@ namespace Chatter {
     }
 
     public interface IProcessMemory {
-        byte[] ReadBytes(uint address, int size);
+        byte[]? ReadBytes(uint address, int size);
     }
 
     public static class ChatRules {
@@ -112,6 +120,9 @@ namespace Chatter {
             if (System.Text.RegularExpressions.Regex.IsMatch(name, @"hebrew|(^|\W)he($|\W)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return "he";
             if (System.Text.RegularExpressions.Regex.IsMatch(name, @"arabic|(^|\W)arab($|\W)|(^|\W)ar($|\W)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return "ar";
             if (System.Text.RegularExpressions.Regex.IsMatch(name, @"turkish|(^|\W)tr($|\W)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return "tr";
+            string lower = name.ToLowerInvariant();
+            foreach (var pair in new[] { new[] { "japanese", "ja" }, new[] { "chinese", "zh" }, new[] { "german", "de" }, new[] { "french", "fr" }, new[] { "spanish", "es" }, new[] { "portuguese", "pt" }, new[] { "ukrainian", "uk" } })
+                if (lower.Contains(pair[0]) || lower == "#" + pair[1]) return pair[1];
             return "en";
         }
 

@@ -84,7 +84,7 @@ namespace Chatter.Tests {
 
         public static void Markup() {
             Fixture plain = GraphTests.Sample();
-            ChatMessage untouched = ChatGraph.Read(plain, 0x10100, 1, "Test User").Channels[0].Messages[0];
+            ChatMessage untouched = ChatGraph.Read(plain, 0x10100, 1, "Test User")!.Channels[0].Messages[0];
             Check(untouched.Source == untouched.Text, "missing markup stays plain");
 
             Fixture fixture = GraphTests.Sample();
@@ -94,21 +94,21 @@ namespace Chatter.Tests {
             fixture.SetWord(0x14010, 0x25000);
             fixture.SetWord(0x2500c, 0x26000);
             fixture.SetString(0x26000, raw);
-            ChatMessage message = ChatGraph.Read(fixture, 0x10100, 1, "Test User").Channels[0].Messages[0];
+            ChatMessage message = ChatGraph.Read(fixture, 0x10100, 1, "Test User")!.Channels[0].Messages[0];
             Check(message.Text == visible && message.Source == raw, "markup source");
             Check(ChatLinks.Find(message.Text, message.Source).Count == 1, "markup link");
 
             fixture.SetString(0x26000, "no");
-            message = ChatGraph.Read(fixture, 0x10100, 1, "Test User").Channels[0].Messages[0];
+            message = ChatGraph.Read(fixture, 0x10100, 1, "Test User")!.Channels[0].Messages[0];
             Check(message.Source == message.Text && message.Text == visible, "mismatched markup stays plain");
 
             fixture.SetString(0x26000, raw);
             var flip = new FlipWord(fixture, 0x14010);
             Check(ChatGraph.Read(flip, 0x10100, 1, "Test User") == null, "markup pointer changed");
 
-            string time = ChatGraph.Read(fixture, 0x10100, 1, "Test User").Channels[0].Messages[1].Time;
+            string? time = ChatGraph.Read(fixture, 0x10100, 1, "Test User")!.Channels[0].Messages[1].Time;
             fixture.SetString(0x21200, time.Substring(0, 5) + " *Test_User");
-            ChatMessage action = ChatGraph.Read(fixture, 0x10100, 1, "Test User").Channels[0].Messages[1];
+            ChatMessage action = ChatGraph.Read(fixture, 0x10100, 1, "Test User")!.Channels[0].Messages[1];
             Check(action.Sender == "Test_User" && action.Outgoing, "action name");
 
             var snapshot = new ChatSnapshot(1, true, "you", new ChatChannel[0], 42);
@@ -166,8 +166,8 @@ namespace Chatter.Tests {
                 this.address = address;
             }
 
-            public byte[] ReadBytes(uint at, int size) {
-                byte[] bytes = fixture.ReadBytes(at, size);
+            public byte[]? ReadBytes(uint at, int size) {
+                byte[]? bytes = fixture.ReadBytes(at, size);
                 if (at == address && size == 4 && ++reads == 2) return BitConverter.GetBytes(BitConverter.ToUInt32(bytes, 0) ^ 1u);
                 return bytes;
             }

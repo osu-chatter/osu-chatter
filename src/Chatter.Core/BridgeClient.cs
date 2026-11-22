@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using Chatter.Shared;
 
 namespace Chatter {
     public sealed class SendPlan {
@@ -20,19 +21,36 @@ namespace Chatter {
     public sealed class BridgeClient {
         readonly object gate = new object();
         readonly string bridgePath;
-        Connection cached;
+        Connection? cached;
 
         public BridgeClient(string bridgePath) {
             if (string.IsNullOrEmpty(bridgePath)) throw new InvalidOperationException("Cannot prepare chat bridge");
             this.bridgePath = bridgePath;
         }
 
-        public void Request(SendPlan plan, string text) {
+        public void Request(SendPlan plan, string? text, Func<bool>? grant = null) {
             if (plan == null) throw new InvalidOperationException("Open this conversation in osu! first");
             if (text != null) ChatRules.ValidateText(text);
+            Exchange(plan, (byte)(text != null ? 1 : 0), Encoding.UTF8.GetBytes(text ?? ""), grant: grant);
+        }
+
+        public int Display(SendPlan plan, IDictionary<string, string> translations) {
+            if (plan == null) throw new ArgumentNullException(nameof(plan));
+            return Exchange(plan, 2, NativeChatProtocol.Encode(translations));
+        }
+
+        public void RestoreDisplay() {
             lock (gate) {
-                PipeLink link = null;
+                if (cached == null) return;
+                Exchange(new SendPlan(new PlayerIdentity(cached.Pid, 0), ""), 3, new byte[0]);
+            }
+        }
+
+        int Exchange(SendPlan plan, byte operation, byte[] textBytes, Action<byte[]>? response = null, Func<bool>? grant = null) {
+            lock (gate) {
+                PipeLink? link = null;
                 if (cached != null && cached.Pid == plan.Identity.Pid) link = PipeLink.TryConnect(cached.Pipe, cached.Pid);
+                if (link == null && (operation == 3 || operation == 5)) return 0;
                 if (link == null) {
                     cached = Attach(plan.Identity.Pid);
                     var until = DateTime.UtcNow.AddSeconds(3);
@@ -46,12 +64,11 @@ namespace Chatter {
                     byte[] nonce = new byte[8];
                     using (var rng = RandomNumberGenerator.Create()) rng.GetBytes(nonce);
                     byte[] targetBytes = Encoding.UTF8.GetBytes(plan.Target);
-                    byte[] textBytes = Encoding.UTF8.GetBytes(text ?? "");
                     using (var payload = new MemoryStream()) {
                         var writer = new BinaryWriter(payload);
                         writer.Write(0x52424331);
-                        writer.Write(cached.Key);
-                        writer.Write((byte)(text != null ? 1 : 0));
+                        writer.Write((cached ?? throw new InvalidOperationException("Bridge session is unavailable")).Key);
+                        writer.Write(operation);
                         writer.Write(plan.Identity.Account);
                         writer.Write(targetBytes.Length);
                         writer.Write(targetBytes);
@@ -63,8 +80,19 @@ namespace Chatter {
                         catch (InvalidOperationException) { throw new InvalidOperationException("Chat request failed; nothing was committed"); }
                     }
                     byte status = link.ReadExact(1, 2300)[0];
-                    if (text == null && status == 3) return;
-                    if (status != 1 || text == null) throw new InvalidOperationException("Direct chat validation failed; nothing was sent");
+                    if (operation == 4 && status == 4) {
+                        int count = BitConverter.ToInt32(link.ReadExact(4, 200), 0);
+                        if (count < 0 || count > 1600) throw new InvalidDataException();
+                        throw new InvalidOperationException("Native command handler: " + new UTF8Encoding(false, true).GetString(link.ReadExact(count, 1000)));
+                    }
+                    if (operation == 4 && status == 3) {
+                        int count = BitConverter.ToInt32(link.ReadExact(4, 200), 0);
+                        if (count < 1 || count > NativeCommandProtocol.MaxPayload) throw new InvalidDataException();
+                        response?.Invoke(link.ReadExact(count, 1000)); return 0;
+                    }
+                    if (operation != 1 && status == 3) return operation == 2 ? BitConverter.ToInt32(link.ReadExact(4, 200), 0) : 0;
+                    if (status != 1 || operation != 1) throw new InvalidOperationException(operation >= 2 ? "In-game translation could not update this osu!stable build" : "Direct chat validation failed; nothing was sent");
+                    if (grant != null && !grant()) throw new InvalidOperationException("The translation command was cancelled or expired; nothing was committed");
                     byte[] commit = new byte[16];
                     Buffer.BlockCopy(nonce, 0, commit, 0, 8);
                     Buffer.BlockCopy(BitConverter.GetBytes(NativeMethods.GetTickCount64() + 75), 0, commit, 8, 8);
@@ -74,8 +102,24 @@ namespace Chatter {
                     try { result = link.ReadExact(1, 200)[0]; }
                     catch (InvalidOperationException) { throw new InvalidOperationException("osu! rejected the direct send; check the conversation before retrying"); }
                     if (result != 2) throw new InvalidOperationException("osu! rejected the direct send; check the conversation before retrying");
+                    return 0;
                 }
             }
+        }
+
+        public GameTranslationCommand? PollCommands(SendPlan plan, bool take, string completed = "", bool success = true) {
+            GameTranslationCommand? captured = null;
+            using (var payload = new MemoryStream()) {
+                using (var writer = new BinaryWriter(payload, Encoding.UTF8, true)) { writer.Write(take); writer.Write(completed ?? ""); writer.Write(success); }
+                Exchange(plan, 4, payload.ToArray(), bytes => {
+                    var item = NativeCommandProtocol.Decode(bytes);
+                    if (item != null) captured = new GameTranslationCommand(item.Id, plan.Identity.Pid, item.Account, item.Target, item.Language, item.Text, item.Original, item.Error, item.Deadline);
+                });
+            }
+            return captured;
+        }
+        public void StopCommands() {
+            lock (gate) { if (cached != null) Exchange(new SendPlan(new PlayerIdentity(cached.Pid, 0), ""), 5, new byte[0]); }
         }
 
         Connection Attach(int pid) {
@@ -149,7 +193,7 @@ namespace Chatter {
         public string PrepareLibrary() {
             byte[] bytes;
             // Prefer the matching embedded bridge in the standalone app.
-            using (var source = System.Reflection.Assembly.GetEntryAssembly()?.GetManifestResourceStream("Chatter.Bundle.Chatter.Bridge.dll")) {
+            using (var source = System.Reflection.Assembly.GetEntryAssembly()?.GetManifestResourceStream("Chatter.Bundle." + BridgeRuntime.FileName)) {
                 if (source != null) {
                     using (var buffer = new MemoryStream()) { source.CopyTo(buffer); bytes = buffer.ToArray(); }
                 } else {
@@ -157,11 +201,24 @@ namespace Chatter {
                     bytes = File.ReadAllBytes(bridgePath);
                 }
             }
+            // Harmony's dependency-merged assembly is shipped beside the isolated bridge.
+            byte[]? harmony = null;
+            using (var source = System.Reflection.Assembly.GetEntryAssembly()?.GetManifestResourceStream("Chatter.Bundle.0Harmony.dll"))
+                if (source != null) using (var buffer = new MemoryStream()) { source.CopyTo(buffer); harmony = buffer.ToArray(); }
+            string harmonySource = Path.Combine(Path.GetDirectoryName(bridgePath), "0Harmony.dll");
+            if (harmony == null && File.Exists(harmonySource)) harmony = File.ReadAllBytes(harmonySource);
             string hash;
             using (var sha = SHA256.Create()) hash = Hex(sha.ComputeHash(bytes), 0, 8);
             string dir = Path.Combine(Path.GetTempPath(), "chatter-bridge", hash);
             Directory.CreateDirectory(dir);
-            string path = Path.Combine(dir, "Chatter.Bridge.dll");
+            string path = Path.Combine(dir, BridgeRuntime.FileName);
+            if (harmony != null) {
+                string dependency = Path.Combine(dir, "0Harmony.dll");
+                if (!File.Exists(dependency)) File.WriteAllBytes(dependency, harmony);
+                byte[] diskHarmony = File.ReadAllBytes(dependency);
+                if (diskHarmony.Length != harmony.Length) throw new InvalidOperationException("Command bridge dependency verification failed");
+                for (int i = 0; i < harmony.Length; i++) if (harmony[i] != diskHarmony[i]) throw new InvalidOperationException("Command bridge dependency verification failed");
+            }
             if (!File.Exists(path)) {
                 try { File.WriteAllBytes(path, bytes); }
                 catch (IOException) { throw new InvalidOperationException("Cannot write chat bridge"); }
@@ -176,7 +233,7 @@ namespace Chatter {
             IntPtr localModule = NativeMethods.GetModuleHandleA("kernel32.dll");
             IntPtr local = NativeMethods.GetProcAddress(localModule, name);
             if (local == IntPtr.Zero) throw new InvalidOperationException("Required bridge export missing");
-            ProcessModule owner = null;
+            ProcessModule? owner = null;
             foreach (ProcessModule module in Process.GetCurrentProcess().Modules) {
                 long start = module.BaseAddress.ToInt64();
                 long end = start + module.ModuleMemorySize;
@@ -211,8 +268,8 @@ namespace Chatter {
 
         sealed class Connection {
             public int Pid;
-            public string Pipe;
-            public byte[] Key;
+            public string Pipe = "";
+            public byte[] Key = Array.Empty<byte>();
         }
 
         sealed class Handle : IDisposable {
@@ -225,7 +282,7 @@ namespace Chatter {
             readonly IntPtr handle;
             PipeLink(IntPtr handle) { this.handle = handle; }
 
-            public static PipeLink TryConnect(string name, int expectPid) {
+            public static PipeLink? TryConnect(string name, int expectPid) {
                 IntPtr handle = NativeMethods.CreateFileW(@"\\.\pipe\" + name, NativeMethods.GenericRead | NativeMethods.GenericWrite,
                     0, IntPtr.Zero, NativeMethods.OpenExisting, NativeMethods.SecuritySqosPresent | NativeMethods.SecurityIdentification, IntPtr.Zero);
                 if (handle == IntPtr.Zero || handle == new IntPtr(-1)) return null;

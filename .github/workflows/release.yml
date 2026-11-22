@@ -33,6 +33,8 @@ jobs:
         run: |
           if ($env:GITHUB_REF -like 'refs/tags/v*') {
             & .\package.bat -NoPause -Version $env:GITHUB_REF_NAME
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            Copy-Item -LiteralPath '.\RELEASE-NOTES.md' -Destination '.\dist\RELEASE-NOTES.md'
           } else {
             & .\check.bat -NoPause
           }
@@ -42,7 +44,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: osu-chatter-windows-x64
-          path: dist/osu-chatter-windows-x64.zip
+          path: |
+            dist/osu-chatter-windows-x64.zip
+            dist/RELEASE-NOTES.md
           if-no-files-found: error
           retention-days: 1
 
@@ -60,4 +64,10 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $env:GITHUB_REF_NAME .\dist\osu-chatter-windows-x64.zip --generate-notes
+          GH_REPO: ${{ github.repository }}
+        shell: pwsh
+        run: |
+          $releaseArguments = @('release', 'create', $env:GITHUB_REF_NAME, '.\dist\osu-chatter-windows-x64.zip', '--notes-file', '.\dist\RELEASE-NOTES.md', '--verify-tag')
+          if ($env:GITHUB_REF_NAME -match '-') { $releaseArguments += @('--prerelease', '--latest=false') }
+          & gh @releaseArguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -9,10 +9,10 @@ namespace Chatter {
         public string RuntimeModule = "mscoree.dll";
         public string CreateExport = "CLRCreateInstance";
         public string RuntimeVersion = "v4.0.30319";
-        public string AssemblyPath;
-        public string TypeName;
-        public string MethodName;
-        public string Argument;
+        public string AssemblyPath = "";
+        public string TypeName = "";
+        public string MethodName = "";
+        public string Argument = "";
         public int GetModuleHandleW;
         public int GetProcAddress;
     }

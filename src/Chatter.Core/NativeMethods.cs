@@ -34,6 +34,9 @@ namespace Chatter {
         public static extern bool CloseHandle(IntPtr handle);
 
         [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool IsWow64Process(IntPtr process, out bool wow64);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
         public static extern bool ReadProcessMemory(IntPtr process, IntPtr address, byte[] buffer, int size, out int read);
 
         [DllImport("kernel32.dll", SetLastError = true)]

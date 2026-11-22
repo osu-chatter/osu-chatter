@@ -1,21 +1,27 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 using System.Net;
 using System.Text;
 
 namespace Chatter {
     public sealed class TranslationRequest {
-        public string Endpoint;
-        public string ApiKey;
-        public string Text;
-        public string Source;
-        public string Target;
+        public string Endpoint = "";
+        public string ApiKey = "";
+        public string Text = "";
+        public string Source = "";
+        public string Target = "";
+        public string Context = "", Glossary = "", Model = "local", ChatEndpoint = "http://127.0.0.1:8080/v1/chat/completions";
+        public string RuntimePath = "", ModelPath = "";
+        public List<ChatLinks.Span> ProtectedSpans = new List<ChatLinks.Span>();
+        public int Threads = 2, GpuLayers;
 
+        internal TranslationRequest MemberwiseCopy() => (TranslationRequest)MemberwiseClone();
         public void Validate() {
             ApiKey = ApiKey ?? "";
             Source = string.IsNullOrEmpty(Source) ? "auto" : Source;
             int textBytes = Text == null ? 0 : Encoding.UTF8.GetByteCount(Text);
-            if (string.IsNullOrEmpty(Text) || textBytes > 8192 || ApiKey.Length > 512
+            if (string.IsNullOrEmpty(Text) || textBytes > 8192 || ApiKey.Length > 512 || ChatRules.HasControl(ApiKey)
                 || Array.IndexOf(ChatRules.Languages, Target) < 0
                 || (Source != "auto" && Array.IndexOf(ChatRules.Languages, Source) < 0))
                 throw new InvalidOperationException("Invalid translation request");
@@ -25,7 +31,11 @@ namespace Chatter {
                     throw new InvalidOperationException("Enter your DeepL API key and choose its Free or Pro plan.");
                 return;
             }
-            if (Endpoint == ChatRules.LocalTranslator) return;
+            if (Endpoint == ChatRules.LocalTranslator || Endpoint == Translator.LocalModel || Endpoint == Translator.NoTranslation) return;
+            if (Endpoint == Translator.ChatApi) {
+                new TranslationRequest { Endpoint = ChatEndpoint ?? "", Text = Text ?? "", Source = Source, Target = Target }.Validate();
+                return;
+            }
             if (string.IsNullOrEmpty(Endpoint) || Endpoint.Length > 2048 || !Uri.TryCreate(Endpoint, UriKind.Absolute, out url))
                 throw new InvalidOperationException("Invalid translation server");
             if (!string.IsNullOrEmpty(url.UserInfo) || !string.IsNullOrEmpty(url.Fragment))
@@ -39,20 +49,43 @@ namespace Chatter {
     }
 
     public sealed class Translator : IDisposable {
+        public const string LocalModel = "local-ai", ChatApi = "chat-api", NoTranslation = "none";
+        readonly LocalAiTranslator ai = new LocalAiTranslator();
         public const string DeepLFree = "deepl-free";
         public const string DeepLPro = "deepl-pro";
         public static bool IsDeepL(string endpoint) => endpoint == DeepLFree || endpoint == DeepLPro;
+        readonly Dictionary<string, string> memory = new Dictionary<string, string>();
+        readonly Queue<string> memoryOrder = new Queue<string>();
+        readonly object memoryGate = new object();
         readonly Func<string, HttpWebRequest> createRequest;
         public Translator() : this(url => (HttpWebRequest)WebRequest.Create(url)) { }
         internal Translator(Func<string, HttpWebRequest> factory) { createRequest = factory; }
         readonly LocalTranslator local = new LocalTranslator();
         public event Action<string> Status { add { local.Status += value; } remove { local.Status -= value; } }
         public void PrepareLocal() { local.Prepare(); }
-        public void Dispose() { local.Dispose(); }
+        public void Dispose() { local.Dispose(); ai.Dispose(); }
         public string Translate(TranslationRequest request) {
             if (request == null) throw new InvalidOperationException("Invalid translation request");
             request.Validate();
-            if (request.Source == request.Target) return request.Text;
+            string cacheKey = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new { request.Endpoint, request.ChatEndpoint, request.Model, request.ModelPath, request.Source, request.Target, request.Text, request.Context, request.Glossary, request.ProtectedSpans });
+            lock (memoryGate) if (memory.TryGetValue(cacheKey, out string cached)) return cached;
+            string result = TranslateCore(request);
+            lock (memoryGate) {
+                if (!memory.ContainsKey(cacheKey)) { memory[cacheKey] = result; memoryOrder.Enqueue(cacheKey); }
+                while (memoryOrder.Count > 256) memory.Remove(memoryOrder.Dequeue());
+            }
+            return result;
+        }
+        string TranslateCore(TranslationRequest request) {
+            if (request == null) throw new InvalidOperationException("Invalid translation request");
+            request.Validate();
+            if (request.Source == request.Target || request.Endpoint == NoTranslation || TranslationContext.IsOnlyLink(request.Text)) return request.Text;
+            string protectedText = TranslationContext.ProtectLinks(request.Text, request.ProtectedSpans, out var protectedLinks);
+            if (protectedLinks.Count > 0) {
+                var safe = (TranslationRequest)request.MemberwiseCopy(); safe.Text = protectedText; safe.ProtectedSpans = new List<ChatLinks.Span>();
+                return TranslationContext.RestoreLinks(Translate(safe), protectedLinks);
+            }
+            if (request.Endpoint == LocalModel || request.Endpoint == ChatApi) return ai.Translate(request);
             if (request.Endpoint == ChatRules.LocalTranslator) return local.Translate(request);
             bool deepL = IsDeepL(request.Endpoint);
             var payload = new StringBuilder();
@@ -88,7 +121,7 @@ namespace Chatter {
                 using (response) {
                     if (response.StatusCode == HttpStatusCode.OK) return ReadTranslation(response, deepL);
                     if (deepL) throw new InvalidOperationException(DeepLError((int)response.StatusCode));
-                    string detail = ReadError(response);
+                    string? detail = ReadError(response);
                     if (!string.IsNullOrEmpty(detail)) throw new InvalidOperationException(detail);
                     throw new InvalidOperationException("Translation failed. Check the language and the server.");
                 }
@@ -149,7 +182,7 @@ namespace Chatter {
             }
         }
 
-        static string ReadError(HttpWebResponse response) {
+        static string? ReadError(HttpWebResponse response) {
             try {
                 var buffer = new byte[2048];
                 int total = 0;
@@ -162,8 +195,8 @@ namespace Chatter {
                     }
                 }
                 string json = Encoding.UTF8.GetString(buffer, 0, total);
-                string error = JsonString(json, "error");
-                if (string.IsNullOrEmpty(error) || error.Length > 180) return null;
+                string? error = JsonString(json, "error");
+                if (error == null || error.Length == 0 || error.Length > 180) return null;
                 return error;
             } catch {
                 return null;
@@ -185,13 +218,13 @@ namespace Chatter {
             }
             if (total > 32768) throw new InvalidOperationException("Translation response too large");
             string json = Encoding.UTF8.GetString(buffer, 0, total);
-            string text = deepL ? DeepLText(json) : JsonString(json, "translatedText");
+            string? text = deepL ? DeepLText(json) : JsonString(json, "translatedText");
             if (text == null || Encoding.UTF8.GetByteCount(text) > 16384)
                 throw new InvalidOperationException("Invalid translation response");
             return text;
         }
 
-        internal static string DeepLText(string json) {
+        internal static string? DeepLText(string json) {
             try {
                 var values = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 32768, RecursionLimit = 16 }
                     .Deserialize<System.Collections.Generic.Dictionary<string, object>>(json);
@@ -222,7 +255,7 @@ namespace Chatter {
             return builder.ToString();
         }
 
-        public static string JsonString(string json, string name) {
+        public static string? JsonString(string json, string name) {
             if (string.IsNullOrEmpty(json) || json.Length > 65536) return null;
             try {
                 var serializer = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 65536, RecursionLimit = 16 };

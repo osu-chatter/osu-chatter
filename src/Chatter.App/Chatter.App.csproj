@@ -10,12 +10,17 @@
     <Prefer32Bit>true</Prefer32Bit>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="System.Web.Extensions" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <EmbeddedResource Include="Resources\chatter.ico" LogicalName="Chatter.App.Resources.chatter.ico" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Chatter.Core\Chatter.Core.csproj" />
     <ProjectReference Include="..\Chatter.Bridge\Chatter.Bridge.csproj" />
   </ItemGroup>
+  <Target Name="EmbedWebViewLoader" BeforeTargets="AssignTargetPaths" DependsOnTargets="ResolveReferences">
+    <ItemGroup><EmbeddedResource Include="$(NuGetPackageRoot)microsoft.web.webview2/1.0.4314.35/runtimes/win-x86/native/WebView2Loader.dll" LogicalName="Chatter.Native.WebView2Loader.dll" /></ItemGroup>
+  </Target>
   <Target Name="EmbedProjectLibraries" BeforeTargets="AssignTargetPaths" DependsOnTargets="ResolveReferences">
     <ItemGroup>
       <EmbeddedResource Include="@(ReferenceCopyLocalPaths)" Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll'">

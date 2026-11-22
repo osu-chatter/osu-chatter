@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Reflection;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Chatter;
 using Chatter.App;
@@ -13,6 +14,48 @@ namespace Chatter.Tests {
         static object Get(object target, string name) => target.GetType().GetField(name, Fields).GetValue(target);
         static void Call(object target, string name, params object[] args) => target.GetType().GetMethod(name, Fields).Invoke(target, args);
         static void Check(bool value, string error) { if (!value) throw new InvalidOperationException(error); }
+        public static void DeletePreviousWord() {
+            var type = typeof(MainForm).Assembly.GetType("Chatter.App.LineField", true);
+            using (var field = (Control)Activator.CreateInstance(type, true)) {
+                var input = (TextBox)Get(field, "Input");
+                var handle = input.Handle;
+                Func<Keys, bool> key = keys => {
+                    var message = Message.Create(handle, 0x0100, (IntPtr)(keys & Keys.KeyCode), IntPtr.Zero);
+                    return (bool)input.GetType().GetMethod("ProcessCmdKey", Fields).Invoke(input, new object[] { message, keys });
+                };
+                Action<string, int, int, string, int> delete = (text, start, length, expected, caret) => {
+                    input.Text = text;
+                    input.Select(start, length);
+                    Check(key(Keys.Control | Keys.Back), "shortcut was not consumed");
+                    Check(input.Text == expected, "unexpected word deletion: " + input.Text);
+                    Check(input.SelectionStart == caret && input.SelectionLength == 0, "caret moved incorrectly");
+                    Check(!input.Text.Contains("\u007f"), "shortcut inserted a DEL character");
+                };
+
+                delete("hello world", 11, 0, "hello ", 6);
+                Check(input.CanUndo, "word deletion cannot be undone");
+                input.Undo();
+                Check(input.Text == "hello world", "undo did not restore the deleted word");
+                delete("hello world   ", 14, 0, "hello ", 6);
+                delete("hello world again", 9, 0, "hello ld again", 6);
+                delete("hello world again", 6, 5, "hello  again", 6);
+                delete("zażółć 👋", 9, 0, "zażółć ", 7);
+                delete("שלום עולם", 9, 0, "שלום ", 5);
+                delete("hello\u00a0world", 11, 0, "hello\u00a0", 6);
+                delete("   ", 3, 0, "", 0);
+                delete("", 0, 0, "", 0);
+                delete("hello", 0, 0, "hello", 0);
+                input.Text = "hello world";
+                input.Select(input.TextLength, 0);
+                Check(key(Keys.Control | Keys.Back) && key(Keys.Control | Keys.Back) && input.Text == "", "repeated shortcut did not delete the sentence");
+                input.Text = "read only";
+                input.Select(input.TextLength, 0);
+                input.ReadOnly = true;
+                Check(key(Keys.Control | Keys.Back) && input.Text == "read only", "read-only input changed");
+                input.ReadOnly = false;
+                Check(!key(Keys.Back), "ordinary Backspace was intercepted");
+            }
+        }
         static List<ChatMessage> Messages(int count) {
             var list = new List<ChatMessage>();
             for (int i = 0; i < count; i++) list.Add(new ChatMessage(i.ToString(), "Friend", "Message " + i + " with some readable text.", "12:30:00", false, false));
@@ -90,6 +133,47 @@ namespace Chatter.Tests {
                 Check(input.Text.Length == 0, "account change kept the previous draft");
             }
         }
+        public static void GameOverlay() {
+            var type = typeof(MainForm).Assembly.GetType("Chatter.App.GameChatOverlay", true);
+            using (var overlay = (Form)Activator.CreateInstance(type)) {
+                var messages = Messages(12);
+                var channel = new ChatChannel("#english", false, true, messages);
+                var translations = new Dictionary<string, string> { ["11"] = "Zażółć gęślą jaźń." };
+                Call(overlay, "SetChat", 0, channel, false, translations, new Dictionary<string, string>());
+                Call(overlay, "RenderChat");
+                var view = Get(overlay, "transcript");
+                var displayed = (IReadOnlyList<ChatMessage>)Get(view, "messages");
+                Check(displayed.Count == 12 && displayed[0].Id == "0", "overlay must retain scrollable history");
+                Check(ReferenceEquals(displayed[11], messages[11]), "overlay replaced the original message");
+                Check(((Dictionary<string, string>)Get(view, "translations"))["11"] == translations["11"], "translation not displayed");
+            }
+        }
+        public static void GameReply() {
+            var type = typeof(MainForm).Assembly.GetType("Chatter.App.GameReplyForm", true);
+            int previews = 0, sends = 0;
+            string submission = "";
+            Func<string, TranslationRequest> request = text => new TranslationRequest { Text = text };
+            Func<TranslationRequest, Task<string>> translate = input => { previews++; return Task.FromResult("hello"); };
+            Func<TranslationRequest, Task<SendReceipt>> submit = input => {
+                sends++;
+                submission = input.Text;
+                return Task.FromException<SendReceipt>(new InvalidOperationException("Fixture send failed"));
+            };
+            using (var reply = (Form)Activator.CreateInstance(type, "#english", "Polish", "English", false, request, translate, submit)) {
+                var draft = (TextBox)Get(Get(reply, "draft"), "Input");
+                var result = (TextBox)Get(reply, "result");
+                draft.Text = "/t cześć";
+                ((Task)type.GetMethod("Translate", Fields).Invoke(reply, new object[] { false })).GetAwaiter().GetResult();
+                Check(previews == 1 && sends == 0 && result.Text == "hello", "preview must not submit");
+                draft.Text = "/t /help";
+                ((Task)type.GetMethod("Translate", Fields).Invoke(reply, new object[] { true })).GetAwaiter().GetResult();
+                Check(sends == 0, "reply allowed a nested command");
+                draft.Text = "/t cześć";
+                ((Task)type.GetMethod("Translate", Fields).Invoke(reply, new object[] { true })).GetAwaiter().GetResult();
+                Check(sends == 1 && submission == "cześć", "send must submit only the message text once");
+                Check(draft.Text == "/t cześć" && result.Text == "Fixture send failed", "failed send must retain the draft");
+            }
+        }
         public static void LocalTranslation() {
             using (var translator = new Translator()) {
                 translator.Status += status => { if (status.Length > 0) Console.WriteLine(status); };
@@ -122,7 +206,7 @@ namespace Chatter.Tests {
                 };
                 view.GetType().GetField("Players", Fields).SetValue(view, (Func<string, PlayerFace>)(name =>
                     name == "Friend" ? new PlayerFace(0, true, null) : new PlayerFace(15, false, null)));
-                string opened = null;
+                string? opened = null;
                 bool translated = false;
                 view.GetType().GetField("Open", Fields).SetValue(view, (Func<string, bool>)(url => { opened = url; return true; }));
                 view.GetType().GetEvent("TranslateRequested").AddEventHandler(view, (Action<ChatMessage>)(message => translated = true));
@@ -164,7 +248,7 @@ namespace Chatter.Tests {
             string source = "is listening to [https://osu.ppy.sh/b/123 " + "Aerosmith - Dream On]";
             using (var view = View()) {
                 view.GetType().GetField("ShowTranslate", Fields).SetValue(view, false);
-                string opened = null;
+                string? opened = null;
                 view.GetType().GetField("Open", Fields).SetValue(view, (Func<string, bool>)(url => { opened = url; return true; }));
                 Call(view, "SetMessages", new List<ChatMessage> {
                     new ChatMessage("a", "db2k", body, "23:11:00", false, false, source)

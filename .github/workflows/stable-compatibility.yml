@@ -1,0 +1,27 @@
+name: osu!stable compatibility watch
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check-stable:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check monitor logic without network access
+        shell: pwsh
+        run: ./scripts/test-stable-monitor.ps1
+      - name: Compare official Stable changelog with recorded compatibility
+        shell: pwsh
+        run: |
+          try {
+            ./scripts/check-stable.ps1
+            'Upstream version matches the recorded baseline. This is not a live game compatibility test.' | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          } catch {
+            'Compatibility watch needs attention. A changed version calls for manual verification; an unavailable feed or missing baseline means compatibility is unknown.' | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+            $_.Exception.Message | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+            throw
+          }

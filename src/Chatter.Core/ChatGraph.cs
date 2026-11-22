@@ -22,7 +22,7 @@ namespace Chatter {
             return found;
         }
 
-        public static ChatSnapshot Read(IProcessMemory memory, uint root, int session, string ownName) {
+        public static ChatSnapshot? Read(IProcessMemory memory, uint root, int session, string ownName) {
             if (memory == null || root < Layout.SelectedRoomBeforeRoot) return null;
             uint? allPtr = Word(memory, root + Layout.AllRooms);
             var all = allPtr.HasValue ? ListRead(memory, allPtr.Value, 512) : null;
@@ -45,7 +45,7 @@ namespace Chatter {
                 uint? tag = Word(memory, room.Value + Clr32Layout.MethodTable);
                 if (!tag.HasValue || tag.Value != roomType.Value) continue;
                 uint? namePtr = Word(memory, room.Value + Layout.RoomName);
-                string name = namePtr.HasValue ? String(memory, namePtr.Value) : null;
+                string? name = namePtr.HasValue ? String(memory, namePtr.Value) : null;
                 if (name == null || name.Length == 0 || name.Length > 160 || ChatRules.HasControl(name)) return null;
                 uint? listPtr = Word(memory, room.Value + Layout.RoomMessages);
                 var list = listPtr.HasValue ? ListRead(memory, listPtr.Value, 10000) : null;
@@ -59,17 +59,18 @@ namespace Chatter {
                     uint? textPtr = Word(memory, obj + Layout.MessageBody);
                     uint? senderPtr = Word(memory, obj + Layout.MessageSender);
                     if (!textPtr.HasValue || !senderPtr.HasValue) return null;
-                    string text = String(memory, textPtr.Value);
-                    string sender = String(memory, senderPtr.Value);
+                    string? text = String(memory, textPtr.Value);
+                    string? sender = String(memory, senderPtr.Value);
                     if (text == null || sender == null) return null;
                     bool system = text.Length == 0 || sender.Length == 0;
-                    byte[] tickBytes = memory.ReadBytes(obj + Layout.MessageTime, Clr32Layout.DateTimeSize);
+                    byte[]? tickBytes = memory.ReadBytes(obj + Layout.MessageTime, Clr32Layout.DateTimeSize);
                     if (tickBytes == null) return null;
                     ulong ticks = BitConverter.ToUInt64(tickBytes, 0) & Clr32Layout.DateTimeTicksMask;
                     if (ticks < 600000000000000000UL || ticks > 3155378975999999999UL) return null;
                     ulong seconds = (ticks / 10000000UL) % 86400UL;
                     string time = string.Format("{0:00}:{1:00}:{2:00}", seconds / 3600UL, (seconds / 60UL) % 60UL, seconds % 60UL);
-                    if (!system) sender = DisplaySender(sender, time);
+                    bool action = !system && sender.StartsWith(time.Substring(0, 5) + " *", StringComparison.Ordinal);
+                    if (!system) sender = Chatter.Shared.ChatMessageIdentity.DisplaySender(sender, time);
                     bool outgoing = !system && !string.IsNullOrEmpty(ownName)
                         && ChatRules.NormalizeName(sender).Equals(ChatRules.NormalizeName(ownName), StringComparison.OrdinalIgnoreCase);
                     if (text.Length == 0) {
@@ -79,11 +80,11 @@ namespace Chatter {
                     if (Word(memory, obj + Layout.MessageBody) != textPtr || Word(memory, obj + Layout.MessageSender) != senderPtr) return null;
                     string? source = null;
                     if (!system && !TryMarkup(memory, obj, text, out source)) return null;
-                    ulong hash = Hash(ticks, name, sender, text);
+                    ulong hash = Chatter.Shared.ChatMessageIdentity.Hash(ticks, name, sender, text);
                     int occurrence;
                     occurrences.TryGetValue(hash, out occurrence);
                     occurrences[hash] = occurrence + 1;
-                    messages.Add(new ChatMessage(hash.ToString("x") + "-" + occurrence.ToString(), sender, text, time, outgoing, system, source));
+                    messages.Add(new ChatMessage(hash.ToString("x") + "-" + occurrence.ToString(), sender, text, time, outgoing, system, source, action));
                 }
                 if (!Unchanged(memory, list) || Word(memory, room.Value + Layout.RoomMessages) != listPtr) return null;
                 channels.Add(new ChatChannel(name, name[0] != '#', room.Value == current.Value, messages));
@@ -94,15 +95,6 @@ namespace Chatter {
             if (Word(memory, root + Layout.AllRooms) != allPtr || Word(memory, root + Layout.TabManager) != manager) return null;
             if (Word(memory, manager.Value + Layout.ManagerTabs) != tabsPtr || Word(memory, root - Layout.SelectedRoomBeforeRoot) != current) return null;
             return new ChatSnapshot(session, null, ownName ?? "", channels);
-        }
-
-        static string DisplaySender(string sender, string time) {
-            string stamp = time.Substring(0, 5) + " ";
-            if (!sender.StartsWith(stamp, StringComparison.Ordinal)) return sender;
-            sender = sender.Substring(stamp.Length);
-            if (sender.EndsWith(":", StringComparison.Ordinal)) sender = sender.Substring(0, sender.Length - 1);
-            if (sender.StartsWith("*", StringComparison.Ordinal)) sender = sender.Substring(1);
-            return sender.Trim();
         }
 
         static bool TryMarkup(IProcessMemory memory, uint obj, string text, out string? source) {
@@ -130,10 +122,10 @@ namespace Chatter {
             public uint Array;
             public uint Version;
             public int Count;
-            public uint[] Items;
+            public uint[] Items = System.Array.Empty<uint>();
         }
 
-        static ClrList ListRead(IProcessMemory memory, uint address, int max) {
+        static ClrList? ListRead(IProcessMemory memory, uint address, int max) {
             if (address < Clr32Layout.MinimumAddress) return null;
             uint? array = Word(memory, address + Clr32Layout.ListArray);
             uint? countWord = Word(memory, address + Clr32Layout.ListCount);
@@ -146,7 +138,7 @@ namespace Chatter {
             int count = (int)countWord.Value;
             var items = new uint[count];
             if (count > 0) {
-                byte[] raw = memory.ReadBytes(array.Value + Clr32Layout.ArrayData, count * Clr32Layout.WordSize);
+                byte[]? raw = memory.ReadBytes(array.Value + Clr32Layout.ArrayData, count * Clr32Layout.WordSize);
                 if (raw == null) return null;
                 for (int i = 0; i < count; i++) items[i] = BitConverter.ToUInt32(raw, i * Clr32Layout.WordSize);
             }
@@ -160,22 +152,22 @@ namespace Chatter {
         }
 
         public static uint? Word(IProcessMemory memory, uint address) {
-            byte[] raw = memory.ReadBytes(address, Clr32Layout.WordSize);
+            byte[]? raw = memory.ReadBytes(address, Clr32Layout.WordSize);
             if (raw == null || raw.Length != Clr32Layout.WordSize) return null;
             return BitConverter.ToUInt32(raw, 0);
         }
 
-        public static string String(IProcessMemory memory, uint address) {
+        public static string? String(IProcessMemory memory, uint address) {
             if (address < Clr32Layout.MinimumAddress) return null;
             uint? length = Word(memory, address + Clr32Layout.StringLength);
             if (!length.HasValue || length.Value > 4096) return null;
             if (length.Value == 0) return "";
-            byte[] raw = memory.ReadBytes(address + Clr32Layout.StringData, (int)length.Value * Clr32Layout.CharacterSize);
+            byte[]? raw = memory.ReadBytes(address + Clr32Layout.StringData, (int)length.Value * Clr32Layout.CharacterSize);
             if (raw == null) return null;
             return DecodeUtf16(raw);
         }
 
-        static string DecodeUtf16(byte[] raw) {
+        static string? DecodeUtf16(byte[] raw) {
             if ((raw.Length & 1) != 0) return null;
             var chars = new char[raw.Length / 2];
             for (int i = 0; i < chars.Length; i++) chars[i] = (char)(raw[i * 2] | (raw[i * 2 + 1] << 8));
@@ -188,20 +180,5 @@ namespace Chatter {
             return new string(chars);
         }
 
-        static ulong Hash(ulong ticks, string name, string sender, string text) {
-            ulong hash = 14695981039346656037UL;
-            Add(ref hash, BitConverter.GetBytes(ticks));
-            Add(ref hash, Encoding.UTF8.GetBytes(name));
-            Add(ref hash, Encoding.UTF8.GetBytes(sender));
-            Add(ref hash, Encoding.UTF8.GetBytes(text));
-            return hash;
-        }
-
-        static void Add(ref ulong hash, byte[] bytes) {
-            for (int i = 0; i < bytes.Length; i++) {
-                hash ^= bytes[i];
-                hash *= 1099511628211UL;
-            }
-        }
     }
 }

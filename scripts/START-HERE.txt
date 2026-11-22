@@ -1,17 +1,61 @@
-osu-chatter
+osu-chatter 1.0.0
 
-Extract the ZIP, then run chatter.exe. Keep chatter.exe.config in the same folder.
-On first launch, choose your translation provider and languages.
+Close any older Chatter instance. Extract the complete ZIP and run chatter.exe.
+Keep chatter.exe.config beside it.
 
-Open osu!stable and sign in. Chatter reads the conversations you have open in-game.
+Open 32-bit osu!stable, sign in and open your conversations in the game.
+osu!lazer is not supported. Select one of those conversations in Chatter.
+On first launch, choose a provider and languages. Settings has Translation,
+In-game chat, Overlay, Application, Models and About inside the main window.
+Save changes (Ctrl+S) applies settings; Back to chat/Esc discards unsaved edits.
 
-Requires 64-bit Windows 10 or 11 and .NET Framework 4.8.
-You don't need Visual Studio, the .NET SDK, or Python to run this download.
+For free local AI: Models -> choose folder and Fast/Quality -> install;
+then Translation -> Local AI -> save. Models are separate large downloads.
+Fast needs about 1.5 GB free; Quality needs about 6.5 GB and is slower.
+Lightweight Argos downloads its own runtime and language pairs as needed.
+Cached models work offline. DeepL API, LibreTranslate and OpenAI-compatible
+chat-completions servers are also supported; hosted providers receive text
+and may charge. Automatic and manual translation can use separate providers.
+No translation mode reads/sends originals. Send original text skips outgoing
+translation in Chatter/reply without turning off incoming translation.
 
-Local translation downloads its runtime during setup and language models as
-needed. The first download can take a while and requires an internet connection.
-For DeepL or a custom server, enter your provider details in Settings.
+Preview never sends. Enter/Send translates and sends once, in menus/lobby.
+The translated message must fit 400 characters. No automatic send retries.
+Join new channels or open private conversations in the game.
+Pause stops reading and native integration; Resume starts reading again.
 
-If osu! runs as administrator, run chatter as administrator too.
+Overlay: enable in Settings -> Overlay, then focus osu! in windowed/borderless
+mode outside gameplay. Ctrl+Shift+O locks/unlocks; Ctrl+Shift+Enter opens reply
+when available. Drag/resize/scroll while unlocked. Shortcuts are configurable.
 
-See README.md for setup details and troubleshooting.
+In-game incoming translation: enable in In-game chat, choose presentation,
+then enable automatic translation and an incoming language for that
+conversation under Translation. This mode also works in exclusive fullscreen.
+It only changes local display, never broadcasts incoming translations.
+
+Native outgoing commands: enable in In-game chat, wait for /t ready, then type
+/t en your message in osu! (/translate is an alias). Codes:
+en pl ru ko ja zh de fr es pt uk he ar tr
+Commands require connection and menus/lobby and expire after 45 seconds.
+Send original text does not bypass translation of these commands.
+
+Ctrl+Tab / Ctrl+Shift+Tab switches conversations; Ctrl+, opens Settings;
+Ctrl+F searches; Up in an empty composer recalls the last submitted draft.
+Application settings include text size, topmost, startup reading and private
+message notifications. If minimize-to-tray is on, closing keeps Chatter running;
+use Quit in the tray menu to exit.
+
+Requires 64-bit Windows 10/11 and .NET Framework 4.8. Modern transcript uses
+Microsoft Edge WebView2; built-in text rendering is available without it.
+No Visual Studio, SDK or system Python is required for the release.
+Use the same Windows privilege level for Chatter and osu!stable.
+
+Settings: %LOCALAPPDATA%/osu-chatter/settings.json (keys use Windows DPAPI).
+Downloaded runtimes/models persist; chat text is not saved to disk by Chatter.
+About -> Inspect current osu! compatibility copies diagnostics without chat.
+About -> Check for app updates opens the releases page.
+
+Read README.md for full feature usage and troubleshooting, and
+RELEASE-NOTES.md for the changes in version 1.0.0.
+Repository guides referenced by those files are available online:
+https://github.com/osu-chatter/osu-chatter/tree/main/docs

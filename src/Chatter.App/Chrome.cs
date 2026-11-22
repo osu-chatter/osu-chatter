@@ -135,12 +135,13 @@ namespace Chatter.App {
         protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
         protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
         protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
+        protected override void OnKeyDown(KeyEventArgs e) { if (Enabled && (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Space)) { OnClick(EventArgs.Empty); e.Handled = e.SuppressKeyPress = true; } else base.OnKeyDown(e); }
     }
 
     sealed class SwitchBox : Control {
         bool on;
         bool hover;
-        public event EventHandler Toggled;
+        public event EventHandler? Toggled;
 
         public bool On {
             get { return on; }
@@ -167,6 +168,7 @@ namespace Chatter.App {
         protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
         protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
         protected override void OnClick(EventArgs e) { on = !on; Invalidate(); if (Toggled != null) Toggled(this, EventArgs.Empty); base.OnClick(e); }
+        protected override void OnKeyDown(KeyEventArgs e) { if (Enabled && (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter)) { OnClick(EventArgs.Empty); e.Handled = e.SuppressKeyPress = true; } else base.OnKeyDown(e); }
     }
 
     sealed class SwapButton : Control {
@@ -235,7 +237,7 @@ namespace Chatter.App {
     }
 
     sealed class LineField : Panel {
-        public readonly TextBox Input = new TextBox();
+        public readonly TextBox Input = new WordTextBox();
 
         public LineField() {
             Height = 40;
@@ -310,8 +312,8 @@ namespace Chatter.App {
 
     sealed class BannerBar : Control {
         string message = "";
-        public event EventHandler ActionClick;
-        public string ActionCaption { get; set; }
+        public event EventHandler? ActionClick;
+        public string ActionCaption { get; set; } = "";
 
         public string Message {
             get { return message; }

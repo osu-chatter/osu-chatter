@@ -84,10 +84,23 @@ Equivalent direct commands:
 
 ```powershell
 dotnet build chatter.slnx -c Release
+.\scripts\test-stable-monitor.ps1
 src\Chatter.Tests\bin\Release\net48\Chatter.Tests.exe
 src\Chatter.App\bin\Release\net48\chatter.exe --smoke
 ```
 
-The default checks use fake game data and a local HTTP fixture. They do not need a real DeepL key and do not send chat messages. Do not run `--live` or `--translation-live` as part of routine contributions: those checks attach to a running osu! client or download translation models.
+The default checks use fake game data, a local HTTP fixture and offline compatibility-monitor fixtures. They do not need a real DeepL key and do not send chat messages. Live probes (`--live`, `--native-live`, `--commands-live`, `--inspect-commands-live`) and translation/model checks (`--translation-live`, `--install-model`, `--install-quality-model`) are separate from routine contributions: they inspect or temporarily modify a running test client, use a translation runtime, or download large models.
+
+Run `check.bat -NoPause -ModernTranscriptCheck` to also exercise the real WebView2 transcript when the runtime is installed. The [compatibility guide](docs/stable-compatibility.md) records the current signatures, offsets and reflected members, and explains manual maintenance and live verification. The separate [daily compatibility watch](docs/stable-compatibility.md#stable-compatibility-workflow) is an early update alert, not a required merge check or a live game test.
 
 Keep pull requests focused. Explain user-visible changes and mention which checks you ran.
+
+## Keeping documentation current
+
+When changing user-visible behavior, update [README.md](README.md) and the packaged [START-HERE.txt](scripts/START-HERE.txt). Keep setting names, shortcuts, provider behavior, sending limits and privacy descriptions aligned with the implementation. Use `SettingsView.cs` and `SettingsView.Providers.cs` for settings labels, `ExperienceOptions.cs` for defaults/ranges, and the MainForm/overlay/reply code for actions and shortcuts. First-run provider labels can differ from the main Settings labels.
+
+The README describes feature usage, models, storage and troubleshooting. [stable-compatibility.md](docs/stable-compatibility.md) documents client layouts, integration diagnostics and the upstream watch. [release-candidate.md](docs/release-candidate.md) records observed validation and outstanding acceptance checks; preserve the distinction between offline fixtures, live no-send probes and actual sending. [releasing.md](docs/releasing.md) covers packaging and publishing. Update the relevant guide when changing those paths, and verify relative links after moving or deleting files.
+
+Documentation-only checks should validate the changed descriptions against source and check links. Do not report a build, live integration test or owner acceptance unless it was actually performed for the stated revision. The release ZIP contains README, START-HERE and RELEASE-NOTES; the full contributor/compatibility guides, historical candidate validation and source links are available in the repository.
+
+Maintainers preparing a tag should follow [Preparing a release](docs/releasing.md); a `v*` tag triggers publication after the build passes.

@@ -82,7 +82,9 @@ namespace Chatter.App {
             this.preferences = preferences.Copy();
             profiles = new PlayerDirectory(this);
             profiles.Changed += delegate { if (!IsDisposed) transcript.RefreshPlayers(); };
+            profiles.AnimationFrame += transcript.RefreshAnimation;
             transcript.Players = profiles.Face;
+            transcript.VisibleMessagesChanged += KickAuto;
             Text = "osu-chatter";
             Icon = AppIcon.Create();
             Font = UiFont.Body;

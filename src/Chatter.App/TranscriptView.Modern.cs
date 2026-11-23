@@ -15,21 +15,23 @@ namespace Chatter.App {
         readonly Dictionary<Image, string> imageData = new Dictionary<Image, string>();
         readonly Dictionary<Image, string> imageKeys = new Dictionary<Image, string>();
         int nextImageKey;
+        bool modernSyncPending, modernStick;
         public void RefreshPlayers() { SyncModern(false); Invalidate(); }
+        public void RefreshAnimation() { if (modern == null && Visible) Invalidate(); }
         public string ModernStatus { get; private set; } = "";
         public async void UseModern(bool enabled, int fontSize) {
             textSize = fontSize;
-            if (!enabled) { modern?.Dispose(); modern = null; Relayout(); return; }
+            if (!enabled) { if (modern == null) return; modern.Dispose(); modern = null; Relayout(); return; }
             if (modern != null) { SyncModern(false); return; }
-            var view = new ModernTranscript(); modern = view;
+            var view = new ModernTranscript(); modern = view; blocks.Clear();
             view.Action += HandleModernAction;
             view.VisibleMessagesChanged += delegate { VisibleMessagesChanged?.Invoke(); };
             try {
                 Controls.Add(view); view.BringToFront(); await view.Initialize();
                 if (!IsDisposed && ReferenceEquals(modern, view)) { ModernStatus = "Color emoji and text selection enabled"; SyncModern(true); }
             } catch (Exception ex) {
-                if (IsDisposed) return; ModernStatus = "Using built-in transcript: " + ex.GetType().Name;
-                view.Dispose(); if (ReferenceEquals(modern, view)) modern = null; Invalidate();
+                if (IsDisposed || !ReferenceEquals(modern, view)) return; ModernStatus = "Using built-in transcript: " + ex.GetType().Name;
+                view.Dispose(); if (ReferenceEquals(modern, view)) { modern = null; Relayout(); }
             }
         }
         public event Action? VisibleMessagesChanged;
@@ -62,7 +64,7 @@ namespace Chatter.App {
             base.Dispose(disposing);
         }
         public HashSet<string> VisibleMessageIds() {
-            if (modern != null && modern.VisibleIds.Count > 0) return new HashSet<string>(modern.VisibleIds);
+            if (modern != null) return new HashSet<string>(modern.VisibleIds);
             return new HashSet<string>(blocks.Where(b => b.Bubble.Bottom >= scroll && b.Bubble.Top <= scroll + Height).Select(b => b.Message.Id));
         }
         public void FindInConversation() {
@@ -85,6 +87,18 @@ namespace Chatter.App {
         }
         void SyncModern(bool stick) {
             if (modern == null) return;
+            modernStick |= stick;
+            if (modernSyncPending) return;
+            if (!IsHandleCreated) { bool immediateStick = modernStick; modernStick = false; SyncModernCore(immediateStick); return; }
+            modernSyncPending = true;
+            BeginInvoke(new Action(() => {
+                modernSyncPending = false;
+                bool pendingStick = modernStick; modernStick = false;
+                if (!IsDisposed) SyncModernCore(pendingStick);
+            }));
+        }
+        void SyncModernCore(bool stick) {
+            if (modern == null) return;
             var avatars = new Dictionary<string, string>();
             var rows = messages.Select(message => {
                 var face = FaceOf(message.Sender); string avatar = "";
@@ -105,7 +119,7 @@ namespace Chatter.App {
                         if (imageData.Count > 512) { imageData.Clear(); imageKeys.Clear(); }
                         imageData[face.Image] = avatar; imageKeys[face.Image] = "avatar" + ++nextImageKey;
                     }
-                    string key = imageKeys[face.Image]; avatars[key] = avatar; avatar = key;
+                    if (avatar.Length > 0) { string key = imageKeys[face.Image]; avatars[key] = avatar; avatar = key; }
                 }
                 translations.TryGetValue(message.Id, out string translated); errors.TryGetValue(message.Id, out string error); Statuses.TryGetValue(message.Id, out string state);
                 return new { id = message.Id, sender = message.Sender, text = message.Text, time = message.Time ?? "", own = message.Outgoing, system = message.System,

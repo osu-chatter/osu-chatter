@@ -24,6 +24,8 @@ namespace Chatter.App {
         public string Status = "Looking for osu!";
         public Color StatusColor = Palette.Faint;
         public string Account = "";
+        string paintedStatus = "", paintedAccount = "";
+        Color paintedStatusColor;
 
         int Px(int value) => (int)Math.Round(value * DeviceDpi / 96.0);
         public ChannelRail() {
@@ -33,9 +35,11 @@ namespace Chatter.App {
         }
 
         public void SetRows(IList<ChannelRow> next) {
+            bool statusChanged = paintedStatus != Status || paintedAccount != Account || paintedStatusColor != StatusColor;
+            paintedStatus = Status; paintedAccount = Account; paintedStatusColor = StatusColor;
             if (next != null && next.Count == rows.Count) {
                 bool same = true; for (int i = 0; i < next.Count; i++) if (rows[i].Name != next[i].Name || rows[i].Selected != next[i].Selected || rows[i].Unread != next[i].Unread || rows[i].Private != next[i].Private) { same = false; break; }
-                if (same) return;
+                if (same) { if (statusChanged) Invalidate(new Rectangle(0, 0, Width, Px(80))); return; }
             }
             rows.Clear();
             if (next != null) rows.AddRange(next);
@@ -176,20 +180,25 @@ namespace Chatter.App {
         }
 
         public void SetMessages(IReadOnlyList<ChatMessage> next, Dictionary<string, string> translated, Dictionary<string, string> failed, bool stick) {
-            if (!stick && SameMessages(next) && SameValues(translations, translated) && SameValues(errors, failed)
-                && lastShowTranslate == ShowTranslate && appliedUpgrade == AllowUpgrade && SameManual()) return;
+            bool same = !stick && SameMessages(next) && SameValues(translations, translated) && SameValues(errors, failed)
+                && lastShowTranslate == ShowTranslate && appliedUpgrade == AllowUpgrade && SameManual();
+            if (same) { if (!SameValues(appliedStatuses, Statuses)) SyncModern(false); RememberStatuses(); return; }
             SaveAnchor();
-            messages = next ?? new ChatMessage[0];
+            // Callers may append/prune their retained buffer in place. Keep the
+            // previous membership so the next comparison can detect those edits.
+            messages = next == null ? (IReadOnlyList<ChatMessage>)new ChatMessage[0] : new List<ChatMessage>(next);
             translations = translated == null ? new Dictionary<string, string>() : new Dictionary<string, string>(translated);
             errors = failed == null ? new Dictionary<string, string>() : new Dictionary<string, string>(failed);
             lastShowTranslate = ShowTranslate;
             RememberManual();
+            RememberStatuses();
             if (stick) { pinned = true; anchorId = null; }
             Relayout();
             SyncModern(stick);
         }
 
         public void SetEmpty(string title, string body) {
+            if (messages.Count == 0 && EmptyTitle == (title ?? "") && EmptyBody == (body ?? "")) return;
             EmptyTitle = title ?? "";
             EmptyBody = body ?? "";
             messages = new ChatMessage[0];
@@ -209,6 +218,9 @@ namespace Chatter.App {
         }
 
         void Relayout() {
+            // WebView2 owns its text layout and resize anchoring. Measuring the same history
+            // with GDI here stalls the UI and used to send a second, forced-bottom update.
+            if (modern != null) return;
             blocks.Clear();
             if (messages.Count == 0 || Width < 40) { contentHeight = 0; scroll = 0; Invalidate(); return; }
             int maxText = Math.Max(120, Math.Min(520, (int)((Width - 64) * 0.72))) - 28;
@@ -293,7 +305,6 @@ namespace Chatter.App {
                 scroll = Clamp(scroll);
             }
             anchorId = null;
-            SyncModern(true);
             Invalidate();
         }
 
@@ -304,6 +315,7 @@ namespace Chatter.App {
         protected override void OnPaint(PaintEventArgs e) {
             var g = e.Graphics;
             g.Clear(Palette.Bg);
+            if (modern != null) return;
             if (messages.Count == 0) {
                 var title = PaintKit.Measure(EmptyTitle, UiFont.BodyStrong, Width - 120);
                 var body = PaintKit.Measure(EmptyBody, UiFont.Body, Math.Min(420, Width - 120));
@@ -457,6 +469,12 @@ namespace Chatter.App {
         string? anchorId;
         int anchorOffset;
         bool lastShowTranslate;
+        readonly Dictionary<string, string> appliedStatuses = new Dictionary<string, string>();
+
+        void RememberStatuses() {
+            appliedStatuses.Clear();
+            foreach (var message in messages) if (Statuses.TryGetValue(message.Id, out string state)) appliedStatuses[message.Id] = state;
+        }
 
         void SaveAnchor() {
             if (pinned) return;
@@ -485,7 +503,7 @@ namespace Chatter.App {
             for (int i = 0; i < next.Count; i++) {
                 var a = next[i]; var b = messages[i];
                 if (a.Id != b.Id || a.Text != b.Text || a.Sender != b.Sender || a.Time != b.Time
-                    || a.Outgoing != b.Outgoing || a.System != b.System || a.Source != b.Source) return false;
+                    || a.Outgoing != b.Outgoing || a.System != b.System || a.Action != b.Action || a.Source != b.Source) return false;
             }
             return true;
         }

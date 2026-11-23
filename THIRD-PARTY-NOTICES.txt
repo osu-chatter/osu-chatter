@@ -5,11 +5,14 @@ license/notice texts are reproduced from the exact pinned NuGet packages.
 WebView2 Runtime is supplied separately by Microsoft, under its own terms.
 
 Optional downloads are separate components: llama.cpp (MIT), Tencent Hy-MT2
-(Apache-2.0), CPython (PSF license), Argos Translate (MIT), langdetect (Apache-2.0)
+(Apache-2.0), MADLAD-400 (Apache-2.0), PLaMo Translate (PLaMo Community License), CPython (PSF license), Argos Translate (MIT), langdetect (Apache-2.0)
 and their dependencies. Packages/models retain their upstream licensing; consult:
 https://github.com/ggml-org/llama.cpp
 https://huggingface.co/tencent/Hy-MT2-1.8B
 https://huggingface.co/tencent/Hy-MT2-7B
+https://huggingface.co/google/madlad400-3b-mt
+https://huggingface.co/pfnet/plamo-3-translate-2b-GGUF
+https://huggingface.co/notjjustnumbers/madlad400-3b-mt-Q4_K_M-GGUF
 https://github.com/argosopentech/argos-translate
 https://github.com/Mimino666/langdetect
 https://docs.python.org/3/license.html

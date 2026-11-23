@@ -89,7 +89,9 @@ src\Chatter.Tests\bin\Release\net48\Chatter.Tests.exe
 src\Chatter.App\bin\Release\net48\chatter.exe --smoke
 ```
 
-The default checks use fake game data, a local HTTP fixture and offline compatibility-monitor fixtures. They do not need a real DeepL key and do not send chat messages. Live probes (`--live`, `--native-live`, `--commands-live`, `--inspect-commands-live`) and translation/model checks (`--translation-live`, `--install-model`, `--install-quality-model`) are separate from routine contributions: they inspect or temporarily modify a running test client, use a translation runtime, or download large models.
+The default checks use fake game data, a local HTTP fixture and offline compatibility-monitor fixtures. They do not need a real DeepL key and do not send chat messages. Live probes (`--live`, `--native-live`, `--commands-live`, `--inspect-commands-live`) and translation/model checks (`--translation-live`, `--install-model`, `--install-quality-model`, `--test-madlad`, `--test-plamo`) are separate from routine contributions: they inspect or temporarily modify a running test client, use a translation runtime, or download large models.
+
+The opt-in `--test-madlad` and `--test-plamo` checks install the corresponding Q4 model plus CPU/Vulkan engines under `artifacts/models`, then translate fixed Russian, Polish, English and Korean fixtures on both backends, including a protected URL. It requires a Vulkan GPU and about 2.5 GB free disk space. Printed request timings include startup/model reloads when needed. GPU cases also require confirmation of offloaded layers from engine diagnostics.
 
 Run `check.bat -NoPause -ModernTranscriptCheck` to also exercise the real WebView2 transcript when the runtime is installed. The [compatibility guide](docs/stable-compatibility.md) records the current signatures, offsets and reflected members, and explains manual maintenance and live verification. The separate [daily compatibility watch](docs/stable-compatibility.md#stable-compatibility-workflow) is an early update alert, not a required merge check or a live game test.
 

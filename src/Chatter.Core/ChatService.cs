@@ -22,6 +22,7 @@ namespace Chatter {
         public ChatSnapshot Read() { return chat.Read(); }
 
         public string Translate(TranslationRequest request) { return translator.Translate(request); }
+        public string AccelerationStatus(ExperienceOptions options) => translator.AccelerationStatus(options);
         public event Action<string> TranslationStatus { add { translator.Status += value; } remove { translator.Status -= value; } }
         public void PrepareTranslator() { translator.PrepareLocal(); }
 

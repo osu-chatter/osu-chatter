@@ -13,23 +13,27 @@ namespace Chatter {
     public static class LocalModelManager {
         public static string DirectoryPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "osu-chatter", "local-ai");
         static readonly SemaphoreSlim installing = new SemaphoreSlim(1, 1);
-        public static ExperienceOptions Install(ExperienceOptions options, Action<string> status, CancellationToken cancellation = default) {
+        public static ExperienceOptions Install(ExperienceOptions options, Action<string> status, CancellationToken cancellation = default, bool engineOnly = false) {
             if (!installing.Wait(0)) throw new InvalidOperationException("A model download is already running.");
             try {
                 string destination = string.IsNullOrWhiteSpace(options.DownloadDirectory) ? DirectoryPath : Path.GetFullPath(options.DownloadDirectory);
-                bool quality = options.ModelVariant == "quality";
-                string modelFile = quality ? "hy-mt2-7b-q4.gguf" : "hy-mt2-1.8b-q4.gguf";
+                string kind = engineOnly ? LocalModelMetadata.Read(options.ModelPath).Kind : options.ModelVariant;
+                bool quality = kind == "quality";
+                bool madlad = kind == "madlad", plamo = kind == "plamo", vulkan = options.EngineBackend == "vulkan";
+                string modelFile = plamo ? "plamo-3-translate-2b-q4.gguf" : madlad ? "madlad400-3b-mt-q4.gguf" : quality ? "hy-mt2-7b-q4.gguf" : "hy-mt2-1.8b-q4.gguf";
+                long requiredMb = madlad || plamo ? 2500L : quality ? 6500L : 1500L;
                 var drive = new DriveInfo(Path.GetPathRoot(destination));
-                if (!File.Exists(Path.Combine(destination, modelFile)) && drive.AvailableFreeSpace < (quality ? 6500L : 1500L) * 1024 * 1024)
-                    throw new InvalidOperationException("The selected model needs " + (quality ? "6.5" : "1.5") + " GB of free space. Choose another download folder in Settings → Models.");
+                if (!engineOnly && !File.Exists(Path.Combine(destination, modelFile)) && drive.AvailableFreeSpace < requiredMb * 1024 * 1024)
+                    throw new InvalidOperationException("The selected model needs about " + requiredMb + " MB of free space. Choose another download folder in Settings → Models.");
                 Directory.CreateDirectory(destination);
-                string runtimeDir = Path.Combine(destination, "engine"); Directory.CreateDirectory(runtimeDir);
-                string executable = Path.Combine(runtimeDir, "llama-server.exe");
+                string runtimeDir = Path.Combine(destination, vulkan ? "engine-vulkan" : "engine"); Directory.CreateDirectory(runtimeDir);
+                string executable = Path.Combine(runtimeDir, madlad ? "llama-completion.exe" : "llama-server.exe");
+                string assetSuffix = vulkan ? "bin-win-vulkan-x64.zip" : "bin-win-cpu-x64.zip";
                 if (!File.Exists(executable)) {
-                    status("Finding the Windows CPU engine…");
+                    status("Finding the Windows " + (vulkan ? "Vulkan GPU" : "CPU") + " engine…");
                     var release = Json("https://api.github.com/repos/ggml-org/llama.cpp/releases/latest");
                     var firstAssets = ((IList)release["assets"]).Cast<Dictionary<string, object>>().ToArray();
-                    if (!firstAssets.Any(a => ((string)a["name"]).EndsWith("bin-win-cpu-x64.zip", StringComparison.OrdinalIgnoreCase))) {
+                    if (!firstAssets.Any(a => ((string)a["name"]).EndsWith(assetSuffix, StringComparison.OrdinalIgnoreCase))) {
                         var marker = firstAssets.FirstOrDefault(a => (string)a["name"] == "nightly-tag.txt");
                         if (marker == null || !(marker["digest"] is string markerHash) || !markerHash.StartsWith("sha256:")) throw new InvalidOperationException("The official engine build marker is unavailable.");
                         string markerFile = Path.Combine(destination, "nightly-tag.txt");
@@ -40,36 +44,37 @@ namespace Chatter {
                         release = Json("https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/" + tag);
                     }
                     var assets = ((IList)release["assets"]).Cast<Dictionary<string, object>>();
-                    var asset = assets.FirstOrDefault(a => ((string)a["name"]).EndsWith("bin-win-cpu-x64.zip", StringComparison.OrdinalIgnoreCase));
+                    var asset = assets.FirstOrDefault(a => ((string)a["name"]).EndsWith(assetSuffix, StringComparison.OrdinalIgnoreCase));
                     if (asset == null || !asset.TryGetValue("digest", out object hash) || !(hash is string digest) || !digest.StartsWith("sha256:"))
-                        throw new InvalidOperationException("The engine release has no verified Windows CPU download. Choose an installed llama-server.exe instead.");
+                        throw new InvalidOperationException("The engine release has no verified download for the selected backend. Choose an installed engine instead.");
                     string zip = Path.Combine(destination, "engine.zip");
                     Download((string)asset["browser_download_url"], zip, digest.Substring(7), status, cancellation);
                     using (var archive = ZipFile.OpenRead(zip)) foreach (var entry in archive.Entries) {
                         cancellation.ThrowIfCancellationRequested();
                         // Only executable/runtime files at a flattened, known destination; no zip paths are trusted.
-                        if (entry.Name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) || entry.Name.Equals("llama-server.exe", StringComparison.OrdinalIgnoreCase) || entry.Name.StartsWith("LICENSE", StringComparison.OrdinalIgnoreCase) || entry.Name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) {
+                        if (entry.Name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) || entry.Name.Equals("llama-server.exe", StringComparison.OrdinalIgnoreCase) || entry.Name.Equals("llama-completion.exe", StringComparison.OrdinalIgnoreCase) || entry.Name.StartsWith("LICENSE", StringComparison.OrdinalIgnoreCase) || entry.Name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) {
                             string target = Path.Combine(runtimeDir, Path.GetFileName(entry.Name));
                             entry.ExtractToFile(target, true);
                         }
                     }
                     File.Delete(zip);
-                    if (!File.Exists(executable)) throw new InvalidOperationException("The downloaded engine did not contain llama-server.exe.");
+                    if (!File.Exists(executable)) throw new InvalidOperationException("The downloaded engine did not contain " + Path.GetFileName(executable) + ".");
                     File.WriteAllText(Path.Combine(runtimeDir, "VERSION.txt"), (string)release["tag_name"]);
                 }
-                string model = Path.Combine(destination, modelFile);
-                if (!File.Exists(model)) {
-                    status("Finding the Hy-MT2 translation model…");
-                    string repo = quality ? "tencent/Hy-MT2-7B-GGUF" : "tencent/Hy-MT2-1.8B-GGUF";
+                string model = engineOnly ? options.ModelPath : Path.Combine(destination, modelFile);
+                if (!engineOnly && !File.Exists(model)) {
+                    status("Finding the " + (plamo ? "PLaMo Translate" : madlad ? "MADLAD-400" : "Hy-MT2") + " translation model…");
+                    string repo = plamo ? "pfnet/plamo-3-translate-2b-GGUF" : madlad ? "notjjustnumbers/madlad400-3b-mt-Q4_K_M-GGUF" : quality ? "tencent/Hy-MT2-7B-GGUF" : "tencent/Hy-MT2-1.8B-GGUF";
                     var manifest = Json("https://huggingface.co/api/models/" + repo + "?blobs=true");
                     var file = ((IList)manifest["siblings"]).Cast<Dictionary<string, object>>().FirstOrDefault(f =>
                         ((string)f["rfilename"]).EndsWith("Q4_K_M.gguf", StringComparison.OrdinalIgnoreCase));
                     if (file == null || !(file["lfs"] is Dictionary<string, object> lfs)) throw new InvalidOperationException("The model has no verified Q4 download.");
                     string revision = (string)manifest["sha"], filename = (string)file["rfilename"];
                     Download("https://huggingface.co/" + repo + "/resolve/" + revision + "/" + filename, model, (string)lfs["sha256"], status, cancellation);
-                    File.WriteAllText(Path.Combine(destination, "MODEL.txt"), repo + "\n" + revision + "\nApache-2.0\n" + (string)lfs["sha256"]);
+                    File.WriteAllText(Path.Combine(destination, modelFile + ".txt"), repo + "\n" + revision + "\n" + (plamo ? "PLaMo Community License" : "Apache-2.0") + "\n" + (string)lfs["sha256"]);
                 }
                 var result = options.Copy(); result.DownloadDirectory = destination; result.RuntimePath = executable; result.ModelPath = model;
+                result.GpuLayers = vulkan ? (options.GpuLayers > 0 ? options.GpuLayers : 100) : 0;
                 status("Local AI engine and model are ready."); return result;
             } finally { installing.Release(); }
         }

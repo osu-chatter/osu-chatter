@@ -9,9 +9,17 @@ On first launch, choose a provider and languages. Settings has Translation,
 In-game chat, Overlay, Application, Models and About inside the main window.
 Save changes (Ctrl+S) applies settings; Back to chat/Esc discards unsaved edits.
 
-For free local AI: Models -> choose folder and Fast/Quality -> install;
+For free local AI: Models -> choose folder, Fast/Quality/MADLAD/PLaMo and CPU/Vulkan -> install;
 then Translation -> Local AI -> save. Models are separate large downloads.
-Fast needs about 1.5 GB free; Quality needs about 6.5 GB and is slower.
+Fast needs about 1.5 GB free; Quality 6.5 GB; MADLAD/PLaMo 2.5 GB.
+Vulkan enables GPU offload on compatible AMD/Intel/NVIDIA GPUs. Reduce GPU
+layers if memory is insufficient. Save the installed paths to apply changes.
+MADLAD reloads per message and does not use context/glossary guidance.
+Choose model storage folder changes future AI downloads to any drive.
+Use existing/custom GGUF model selects your own supported model; Prepare
+engine installs only its runtime. Save to apply the selected model and paths.
+The status line reports CPU or verified GPU offload. Argos always uses CPU.
+PLaMo uses the PLaMo Community License; Ukrainian/Turkish pairs are unsupported.
 Lightweight Argos downloads its own runtime and language pairs as needed.
 Cached models work offline. DeepL API, LibreTranslate and OpenAI-compatible
 chat-completions servers are also supported; hosted providers receive text

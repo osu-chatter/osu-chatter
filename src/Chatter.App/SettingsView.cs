@@ -30,6 +30,7 @@ namespace Chatter.App {
         readonly PillButton apply = new PillButton { Caption = "Save changes", Filled = true };
         readonly PillButton back = new PillButton { Caption = "Back to chat" };
         TextBox runtime = null!, model = null!;
+        SettingsNumber gpuLayers = null!;
         bool downloadActive;
         bool initializing = true;
         bool downloading { get => downloadActive; set { downloadActive = value; apply.Enabled = !value; } }
@@ -112,30 +113,63 @@ namespace Chatter.App {
             });
             Page("Models", models => {
             Heading(models, "Local AI · no translation API quota");
-            Note(models, "Download a free model to translate on your PC. Choose Fast for shorter waits, or Quality for a larger model. Installed models work offline.");
-            var downloadDirectory = Input(models, "Download folder", working.Experience.DownloadDirectory, "Leave empty to use the default app folder.");
+            Note(models, "Download a free model to translate on your PC. Choose Fast, Quality, or MADLAD-400 to compare translations. Installed models work offline.");
+            var downloadDirectory = Input(models, "Model storage folder", string.IsNullOrWhiteSpace(working.Experience.DownloadDirectory) ? LocalModelManager.DirectoryPath : working.Experience.DownloadDirectory, "Choose any drive for AI models and engines. Existing files stay in their current folder; select them below to use them.");
             save.Add(() => working.Experience.DownloadDirectory = downloadDirectory.Text.Trim());
-            Button(models, "Choose download folder…", () => { using (var picker = new FolderBrowserDialog()) if (picker.ShowDialog(FindForm()) == DialogResult.OK) { downloadDirectory.Text = picker.SelectedPath; working.Experience.DownloadDirectory = picker.SelectedPath; } });
-            Choice(models, "Local model preset", new[] { "Fast · Hy-MT2 1.8B Q4", "Quality · Hy-MT2 7B Q4 (larger download)" }, new[] { "fast", "quality" }, working.Experience.ModelVariant, v => working.Experience.ModelVariant = v);
-            Button(models, "Install recommended local engine + model", async () => {
+            Button(models, "Choose model storage folder…", () => {
+                using (var picker = new FolderBrowserDialog { SelectedPath = downloadDirectory.Text }) if (picker.ShowDialog(FindForm()) == DialogResult.OK) {
+                    downloadDirectory.Text = picker.SelectedPath; working.Experience.DownloadDirectory = picker.SelectedPath;
+                    string relocated = Path.Combine(picker.SelectedPath, Path.GetFileName(model.Text));
+                    if (File.Exists(relocated)) {
+                        model.Text = relocated;
+                        string executable = LocalModelMetadata.Read(relocated).Kind == "madlad" ? "llama-completion.exe" : "llama-server.exe";
+                        string engine = Path.Combine(picker.SelectedPath, working.Experience.EngineBackend == "vulkan" ? "engine-vulkan" : "engine", executable);
+                        runtime.Text = File.Exists(engine) ? engine : "";
+                        status.Text = "Found your model in this folder. Prepare its engine if needed, then save.";
+                    } else status.Text = "Storage folder changed. Install or select a model in this folder, then save.";
+                }
+            });
+            Button(models, "Use existing / custom GGUF model…", () => {
+                using (var picker = new OpenFileDialog { Filter = "llama.cpp GGUF model|*.gguf", InitialDirectory = downloadDirectory.Text }) {
+                    if (picker.ShowDialog(FindForm()) != DialogResult.OK) return;
+                    try {
+                        var details = LocalModelMetadata.Read(picker.FileName);
+                        model.Text = picker.FileName; working.Experience.ModelPath = picker.FileName;
+                        string executable = details.Kind == "madlad" ? "llama-completion.exe" : "llama-server.exe";
+                        string selectedEngine = Path.Combine(downloadDirectory.Text, working.Experience.EngineBackend == "vulkan" ? "engine-vulkan" : "engine", executable);
+                        runtime.Text = File.Exists(selectedEngine) ? selectedEngine : "";
+                        status.Text = "Selected " + details.Name + " (" + details.Architecture + "). Prepare its engine below, then save.";
+                    } catch (Exception ex) { status.Text = ex.Message; }
+                }
+            });
+            Note(models, "Custom GGUF support: Hy-MT/instruction chat models, MADLAD-400 T5, and PLaMo Translate. The model must be supported by the installed llama.cpp engine. Other formats require an external Chat API server.");
+            Choice(models, "Local model preset", new[] { "Fast · Hy-MT2 1.8B Q4", "Quality · Hy-MT2 7B Q4 (larger download)", "MADLAD-400 · 3B Q4", "PLaMo Translate · 2B Q4" }, new[] { "fast", "quality", "madlad", "plamo" }, working.Experience.ModelVariant, v => working.Experience.ModelVariant = v);
+            Choice(models, "Local engine", new[] { "CPU", "Vulkan GPU · AMD / Intel / NVIDIA" }, new[] { "cpu", "vulkan" }, working.Experience.EngineBackend, v => working.Experience.EngineBackend = v);
+            async void InstallModel(bool engineOnly) {
                 if (downloading) return; working.Experience.DownloadDirectory = downloadDirectory.Text.Trim(); downloading = true;
+                working.Experience.ModelPath = model.Text.Trim();
                 try {
                     var progress = new Progress<string>(s => { if (!IsDisposed) status.Text = s; });
-                    var installed = await Task.Run(() => LocalModelManager.Install(working.Experience, s => ((IProgress<string>)progress).Report(s), stop.Token));
+                    var options = working.Experience.Copy();
+                    var installed = await Task.Run(() => LocalModelManager.Install(options, s => ((IProgress<string>)progress).Report(s), stop.Token, engineOnly));
                     if (IsDisposed || Disposing) return;
                     runtime.Text = installed.RuntimePath; model.Text = installed.ModelPath;
+                    working.Experience.GpuLayers = installed.GpuLayers;
+                    gpuLayers.Value = installed.GpuLayers;
                     status.Text = "Installed. Select Local AI on the Translation tab, then save.";
                 } catch (Exception ex) { if (!IsDisposed) status.Text = ex is OperationCanceledException ? "Download cancelled." : ex.Message; }
                 finally { downloading = false; }
-            });
+            }
+            Button(models, "Install recommended local engine + model", () => InstallModel(false));
+            Button(models, "Prepare engine for selected custom model", () => InstallModel(true));
             Heading(models, "Advanced model options");
             runtime = Input(models, "Engine file", working.Experience.RuntimePath); save.Add(() => working.Experience.RuntimePath = runtime.Text.Trim());
-            Button(models, "Browse engine…", () => Pick(runtime, "llama-server.exe|llama-server.exe"));
+            Button(models, "Browse engine…", () => Pick(runtime, "Local engine|llama-server.exe;llama-completion.exe"));
             model = Input(models, "Model file (.gguf)", working.Experience.ModelPath); save.Add(() => working.Experience.ModelPath = model.Text.Trim());
             Button(models, "Browse model…", () => Pick(model, "GGUF model|*.gguf"));
             Number(models, "CPU threads", 1, 32, working.Experience.CpuThreads, v => working.Experience.CpuThreads = v);
-            Number(models, "GPU layers (0 = CPU; requires a compatible engine)", 0, 100, working.Experience.GpuLayers, v => working.Experience.GpuLayers = v);
-            Note(models, "Fast preset: about 1.1 GB · Quality preset: about 4.6 GB. Allow 1.5 GB / 6.5 GB free space respectively. Quality is slower and needs more RAM; slang and jokes can still be mistranslated.");
+            gpuLayers = Number(models, "GPU layers (0 = CPU; requires a compatible engine)", 0, 100, working.Experience.GpuLayers, v => working.Experience.GpuLayers = v);
+            Note(models, "Downloads: Fast 1.1 GB · Quality 4.6 GB · MADLAD 1.9 GB · PLaMo 1.8 GB. Allow 1.5 / 6.5 / 2.5 / 2.5 GB free respectively. Vulkan installation enables GPU offload. MADLAD translates individual messages without context or glossary and reloads per request. PLaMo uses the PLaMo Community License. Slang and jokes can still be mistranslated.");
             var installedModels = new Label { ForeColor = Palette.Muted, AutoSize = true, Font = UiFont.Small, MaximumSize = new Size(650, 0), Margin = new Padding(0, 12, 0, 18) };
             models.Controls.Add(installedModels);
             Action refreshModels = async () => {
@@ -184,7 +218,7 @@ namespace Chatter.App {
             });
             Button(about, "Check for app updates", () => Process.Start(new ProcessStartInfo("https://github.com/osu-chatter/osu-chatter/releases") { UseShellExecute = true }));
             Button(about, "Open compatibility guide", () => Process.Start(new ProcessStartInfo("https://github.com/osu-chatter/osu-chatter/blob/main/docs/stable-compatibility.md") { UseShellExecute = true }));
-            Note(about, "Modern transcript uses Microsoft Edge WebView2. If its runtime is unavailable, Chatter uses the built-in transcript.\nLocal AI: Hy-MT2 (Apache-2.0), llama.cpp (MIT). See THIRD-PARTY-NOTICES.txt in the release archive.");
+            Note(about, "Modern transcript uses Microsoft Edge WebView2. If its runtime is unavailable, Chatter uses the built-in transcript.\nLocal AI: Hy-MT2 and MADLAD-400 (Apache-2.0), llama.cpp (MIT). See THIRD-PARTY-NOTICES.txt in the release archive.");
 
             });
             SelectPage(0); ResumeLayout(true); initializing = false;
@@ -260,8 +294,9 @@ namespace Chatter.App {
         void Check(FlowLayoutPanel page, string caption, bool value, Action<bool> setter, string description = "") {
             var input = new SwitchBox { On = value, TabStop = true, AccessibleName = caption }; AddRow(page, caption, description, input); input.Toggled += delegate { MarkChanged(); }; save.Add(() => setter(input.On));
         }
-        void Number(FlowLayoutPanel page, string caption, int min, int max, int value, Action<int> setter, string description = "") {
+        SettingsNumber Number(FlowLayoutPanel page, string caption, int min, int max, int value, Action<int> setter, string description = "") {
             var input = new SettingsNumber(min, max, value); AddRow(page, caption, description, input); input.Changed += MarkChanged; save.Add(() => setter(input.Value));
+            return input;
         }
         DarkPicker Choice(FlowLayoutPanel page, string caption, string[] labels, string[] values, string current, Action<string> setter) {
             var combo = new DarkPicker { Name = caption }; combo.Items.AddRange(labels); combo.SelectedIndex = Math.Max(0, Array.IndexOf(values, current));

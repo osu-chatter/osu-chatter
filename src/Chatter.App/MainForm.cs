@@ -279,9 +279,9 @@ namespace Chatter.App {
             settings.Visible = false;
             settings.SetBounds(0, 0, Px(320), ClientSize.Height); LayoutSettings(Px(320));
             int contentW = mainW;
-            if (settingsView != null) {
+            if (settingsOpen) {
                 header.Visible = transcript.Visible = composer.Visible = translationProgress.Visible = banner.Visible = false;
-                settingsView.SetBounds(mainX, 0, mainW, ClientSize.Height); settingsView.BringToFront();
+                if (settingsView != null) { settingsView.SetBounds(mainX, 0, mainW, ClientSize.Height); settingsView.BringToFront(); }
                 return;
             }
             header.Visible = transcript.Visible = composer.Visible = translationProgress.Visible = true;

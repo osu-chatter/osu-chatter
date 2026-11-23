@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Chatter;
 
@@ -42,6 +43,16 @@ namespace Chatter.App {
     }
 
     static class PaintKit {
+        // Flush the whole native child-window tree after a scene change. Updating
+        // just the parent leaves queued Label/TextBox paints and copied HWND bits.
+        public static void Redraw(Control control) {
+            if (control.IsDisposed || !control.Visible) return;
+            if (!control.IsHandleCreated) { control.Invalidate(true); return; }
+            RedrawWindow(control.Handle, IntPtr.Zero, IntPtr.Zero, 0x0001 | 0x0004 | 0x0080 | 0x0100);
+        }
+        [DllImport("user32.dll")]
+        static extern bool RedrawWindow(IntPtr window, IntPtr updateRect, IntPtr updateRegion, uint flags);
+
         public const TextFormatFlags Wrap = TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.TextBoxControl;
         public const TextFormatFlags Single = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine;
 
@@ -97,13 +108,14 @@ namespace Chatter.App {
 
     sealed class PillButton : Control {
         bool hover;
+        bool filled;
         string caption = "";
-        public bool Filled { get; set; }
+        public bool Filled { get => filled; set { if (filled == value) return; filled = value; Invalidate(); } }
         public bool OpensMenu { get; set; }
 
         public string Caption {
             get { return caption; }
-            set { caption = value ?? ""; Invalidate(); }
+            set { string next = value ?? ""; if (caption == next) return; caption = next; Invalidate(); }
         }
 
         public PillButton() {

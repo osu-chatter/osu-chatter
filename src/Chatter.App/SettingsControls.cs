@@ -1,43 +1,180 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
 namespace Chatter.App {
+    // The native owner-drawn ComboBox repeatedly creates/recreates its HWND while
+    // it is populated, parented and sized. Settings has many of them. Keep the
+    // closed selector lightweight and create its native popup only on demand.
+    sealed class SettingsPicker : Control {
+        public List<string> Items { get; } = new List<string>();
+        public event EventHandler? SelectedIndexChanged;
+        internal Action<int>? ScrollRequested;
+        ContextMenuStrip? menu;
+        int selectedIndex = -1;
+        public int SelectedIndex {
+            get => selectedIndex;
+            set {
+                if (value < -1 || value >= Items.Count) throw new ArgumentOutOfRangeException(nameof(value));
+                if (selectedIndex == value) return;
+                selectedIndex = value; Text = value < 0 ? "" : Items[value];
+                Invalidate(); SelectedIndexChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        public SettingsPicker() {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
+            Size = new Size(180, 36); Font = UiFont.Body; BackColor = Palette.Field; ForeColor = Palette.Ink;
+            TabStop = true; Cursor = Cursors.Hand; AccessibleRole = AccessibleRole.ComboBox;
+        }
+        protected override void OnPaint(PaintEventArgs e) {
+            PaintKit.ClearBehind(e.Graphics, this);
+            var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
+            PaintKit.FillRound(e.Graphics, bounds, 7, Palette.Field);
+            PaintKit.StrokeRound(e.Graphics, bounds, 7, Focused ? Palette.Accent : Palette.Line);
+            TextRenderer.DrawText(e.Graphics, selectedIndex < 0 ? "Choose…" : Items[selectedIndex], Font, new Rectangle(12, 0, Math.Max(0, Width - 38), Height), Enabled ? Palette.Ink : Palette.Faint, PaintKit.Single);
+            using (var pen = new Pen(Palette.Muted, 1.5f)) {
+                int x = Width - 20, y = Height / 2;
+                e.Graphics.DrawLines(pen, new[] { new Point(x - 4, y - 2), new Point(x, y + 2), new Point(x + 4, y - 2) });
+            }
+        }
+        protected override void OnClick(EventArgs e) { Focus(); OpenChoices(); base.OnClick(e); }
+        internal void OpenChoices() {
+            if (!Enabled || Items.Count == 0) return;
+            if (menu?.Visible == true) { menu.Close(); return; }
+            if (menu == null) menu = new ContextMenuStrip { BackColor = Palette.Field, ForeColor = Palette.Ink, Font = Font, ShowImageMargin = false, ShowCheckMargin = true, Renderer = new PickerRenderer() };
+            if (menu.Items.Count != Items.Count) {
+                while (menu.Items.Count > 0) menu.Items[0].Dispose();
+                for (int i = 0; i < Items.Count; i++) {
+                    int index = i;
+                    var item = new ToolStripMenuItem();
+                    item.Click += delegate { SelectedIndex = index; Focus(); };
+                    menu.Items.Add(item);
+                }
+            }
+            for (int i = 0; i < Items.Count; i++) {
+                var item = (ToolStripMenuItem)menu.Items[i];
+                item.Text = Items[i]; item.Checked = i == selectedIndex; item.AutoSize = false;
+                item.Size = new Size(Math.Max(Width - 5, 120), Math.Max(Font.Height + 12, 28));
+            }
+            menu.MinimumSize = new Size(Width, 0);
+            menu.Show(this, new Point(0, Height));
+            if (selectedIndex >= 0) menu.Items[selectedIndex].Select();
+        }
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData) {
+            if (keyData == Keys.Space || keyData == Keys.Enter || keyData == Keys.F4 || keyData == (Keys.Alt | Keys.Down)) { OpenChoices(); return true; }
+            if (keyData == Keys.Up || keyData == Keys.Down || keyData == Keys.Home || keyData == Keys.End) {
+                if (Items.Count > 0) SelectedIndex = keyData == Keys.Home ? 0 : keyData == Keys.End ? Items.Count - 1 : Math.Max(0, Math.Min(Items.Count - 1, selectedIndex + (keyData == Keys.Down ? 1 : -1)));
+                return true;
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+        protected override void OnKeyPress(KeyPressEventArgs e) {
+            if (!char.IsControl(e.KeyChar)) for (int i = 1; i <= Items.Count; i++) {
+                int index = (selectedIndex + i) % Items.Count;
+                if (Items[index].StartsWith(e.KeyChar.ToString(), StringComparison.CurrentCultureIgnoreCase)) { SelectedIndex = index; e.Handled = true; break; }
+            }
+            base.OnKeyPress(e);
+        }
+        protected override void OnMouseWheel(MouseEventArgs e) { ScrollRequested?.Invoke(e.Delta); if (e is HandledMouseEventArgs handled) handled.Handled = true; }
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+        protected override void OnVisibleChanged(EventArgs e) { if (!Visible) menu?.Close(); base.OnVisibleChanged(e); }
+        protected override void Dispose(bool disposing) { if (disposing) menu?.Dispose(); base.Dispose(disposing); }
+        protected override AccessibleObject CreateAccessibilityInstance() => new PickerAccessibility(this);
+        sealed class PickerAccessibility : ControlAccessibleObject {
+            readonly SettingsPicker owner;
+            public PickerAccessibility(SettingsPicker owner) : base(owner) { this.owner = owner; }
+            public override string Value { get => owner.Text; set { int index = owner.Items.IndexOf(value); if (index >= 0) owner.SelectedIndex = index; } }
+            public override string DefaultAction => "Open";
+            public override AccessibleStates State => base.State | AccessibleStates.HasPopup | (owner.menu?.Visible == true ? AccessibleStates.Expanded : AccessibleStates.Collapsed);
+            public override void DoDefaultAction() { owner.Focus(); owner.OpenChoices(); }
+        }
+        sealed class PickerRenderer : ToolStripProfessionalRenderer {
+            protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e) {
+                var bounds = e.ImageRectangle;
+                using (var brush = new SolidBrush(e.Item.Selected ? Palette.Elevated : Palette.Field)) e.Graphics.FillRectangle(brush, bounds);
+                using (var pen = new Pen(Palette.AccentHot, 2)) {
+                    int x = bounds.Left + bounds.Width / 2, y = bounds.Top + bounds.Height / 2;
+                    e.Graphics.DrawLines(pen, new[] { new Point(x - 4, y), new Point(x - 1, y + 3), new Point(x + 5, y - 4) });
+                }
+            }
+            protected override void OnRenderImageMargin(ToolStripRenderEventArgs e) {
+                using (var brush = new SolidBrush(Palette.Field)) e.Graphics.FillRectangle(brush, e.AffectedBounds);
+            }
+            protected override void OnRenderMenuItemBackground(ToolStripItemRenderEventArgs e) {
+                using (var brush = new SolidBrush(e.Item.Selected ? Palette.Elevated : Palette.Field)) e.Graphics.FillRectangle(brush, new Rectangle(Point.Empty, e.Item.Size));
+            }
+            protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e) {
+                using (var pen = new Pen(Palette.Line)) e.Graphics.DrawRectangle(pen, 0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
+            }
+        }
+    }
+
+    sealed class BufferedFlowPanel : FlowLayoutPanel {
+        public BufferedFlowPanel() { DoubleBuffered = true; ResizeRedraw = true; }
+    }
+
     // A clipped content surface with an app-drawn scrollbar, rather than a native white gutter.
     sealed class SettingsScroller : Panel {
-        public readonly FlowLayoutPanel Content = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = false, BackColor = Palette.Bg };
+        public readonly FlowLayoutPanel Content = new BufferedFlowPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = false, BackColor = Palette.Bg };
         int offset, grab;
-        bool dragging, sizing;
+        bool dragging, sizing, layingOut;
+        int layoutWidth = -1;
         int Px(int v) => (int)Math.Round(v * DeviceDpi / 96.0);
         public SettingsScroller() {
             DoubleBuffered = true; BackColor = Palette.Bg; Controls.Add(Content);
             Content.SizeChanged += delegate { PlaceContent(); };
             Content.Layout += delegate { UpdateExtent(); };
+            Content.ControlAdded += (sender, e) => FitRow(e.Control, Math.Max(1, Content.Width));
         }
         protected override void OnLayout(LayoutEventArgs e) {
             base.OnLayout(e);
-            if (Content == null) return;
+            if (Content == null || layingOut) return;
             int width = Math.Max(1, ClientSize.Width - Px(18));
-            Content.MinimumSize = new Size(width, 0); Content.MaximumSize = new Size(width, 0); Content.Width = width;
+            // Moving the content to scroll also raises Layout. Only reflow rows when
+            // the viewport width changes, never on each scroll position update.
+            if (layoutWidth == width) { PlaceContent(); return; }
+            layoutWidth = width; layingOut = true;
             Content.SuspendLayout();
-            foreach (Control row in Content.Controls) { if (row is Label label && label.AutoSize) label.MaximumSize = new Size(Math.Max(1, width - row.Margin.Horizontal), 0); row.Width = Math.Max(1, width - row.Margin.Horizontal); }
-            Content.ResumeLayout(true); UpdateExtent();
+            try {
+                Content.MinimumSize = new Size(width, 0); Content.MaximumSize = new Size(width, 0); Content.Width = width;
+                foreach (Control row in Content.Controls) FitRow(row, width);
+            } finally { Content.ResumeLayout(true); layingOut = false; }
+            UpdateExtent();
+        }
+        static void FitRow(Control row, int width) {
+            int available = Math.Max(1, width - row.Margin.Horizontal);
+            if (row is Label label && label.AutoSize) label.MaximumSize = new Size(available, 0);
+            row.Width = available;
         }
         protected override void OnVisibleChanged(EventArgs e) { base.OnVisibleChanged(e); if (Visible && Content != null) { Content.PerformLayout(); UpdateExtent(); } }
         void UpdateExtent() {
-            if (sizing) return; sizing = true;
+            // Effective child visibility becomes false while a section is hidden.
+            // Treating that as empty content erased its extent and reading position.
+            if (sizing || !Visible) return; sizing = true;
             try { int height = 0; foreach (Control row in Content.Controls) if (row.Visible) height = Math.Max(height, row.Bottom + row.Margin.Bottom); Content.Height = height; PlaceContent(); }
             finally { sizing = false; }
         }
-        void PlaceContent() {
+        bool PlaceContent() {
             offset = Math.Max(0, Math.Min(offset, Math.Max(0, Content.Height - Height)));
-            Content.Location = new Point(0, -offset); Invalidate();
+            var location = new Point(0, -offset);
+            bool moved = Content.Location != location;
+            if (moved) {
+                Content.Location = location;
+                // Moving a child HWND can copy pixels from its old clipped position.
+                // Repaint the visible content and its children, not just the gutter.
+                Content.Invalidate(new Rectangle(0, offset, Content.Width, Height), true);
+                Invalidate();
+            }
+            Invalidate(new Rectangle(Math.Max(0, Width - Px(18)), 0, Px(18), Height));
+            return moved;
         }
-        internal void ScrollBy(int delta) { offset -= delta; PlaceContent(); }
+        internal void ScrollBy(int delta) { offset -= delta; if (PlaceContent()) PaintKit.Redraw(this); }
         internal void EnsureVisible(Control row) {
             if (row.Top < offset) offset = Math.Max(0, row.Top - Px(8));
             else if (row.Bottom > offset + Height) offset = row.Bottom - Height + Px(8);
-            PlaceContent();
+            if (PlaceContent()) PaintKit.Redraw(this);
         }
         Rectangle Thumb() {
             if (Content.Height <= Height || Height <= 0) return Rectangle.Empty;
@@ -53,31 +190,36 @@ namespace Chatter.App {
             if (e.Button != MouseButtons.Left || e.X < Width - Px(15) || Thumb().IsEmpty) return;
             var thumb = Thumb(); grab = thumb.Contains(e.Location) ? e.Y - thumb.Y : thumb.Height / 2; dragging = true; Capture = true; DragTo(e.Y);
         }
-        void DragTo(int y) { offset = (int)((long)(y - grab) * Math.Max(0, Content.Height - Height) / Math.Max(1, Height - Thumb().Height)); PlaceContent(); }
+        void DragTo(int y) { offset = (int)((long)(y - grab) * Math.Max(0, Content.Height - Height) / Math.Max(1, Height - Thumb().Height)); if (PlaceContent()) PaintKit.Redraw(this); }
         protected override void OnMouseMove(MouseEventArgs e) { if (dragging) DragTo(e.Y); }
         protected override void OnMouseUp(MouseEventArgs e) { dragging = false; Capture = false; Invalidate(); }
+        protected override void OnMouseCaptureChanged(EventArgs e) { if (!Capture) { dragging = false; Invalidate(); } base.OnMouseCaptureChanged(e); }
     }
 
     sealed class SettingsRow : Panel {
-        readonly Label caption = new Label { ForeColor = Palette.Ink, Font = UiFont.BodyStrong, BackColor = Palette.Elevated };
-        readonly Label detail = new Label { ForeColor = Palette.Muted, Font = UiFont.Small, BackColor = Palette.Elevated };
+        readonly string caption, detail;
+        Rectangle captionBounds, detailBounds;
         public Control Editor { get; }
-        public string Caption => caption.Text;
+        public string Caption => caption;
         readonly bool wide;
         readonly bool hasDescription;
         int measuredWidth = -1, measuredTitle, measuredDetail;
         int Px(int v) => (int)Math.Round(v * DeviceDpi / 96.0);
-        public SettingsRow(string title, string description, Control editor, bool fullWidth = false) {
+        public SettingsRow(string title, string description, Control editor, bool fullWidth = false, int initialWidth = 200) {
+            SuspendLayout(); Width = initialWidth;
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             BackColor = Palette.Elevated; Margin = new Padding(0, 0, 0, 8); wide = fullWidth;
-            caption.Text = title; detail.Text = description; hasDescription = description.Length > 0; detail.Visible = hasDescription; Editor = editor;
-            caption.FontChanged += delegate { measuredWidth = -1; }; detail.FontChanged += delegate { measuredWidth = -1; };
-            editor.AccessibleName = title; editor.BackColor = Palette.Elevated;
-            Controls.Add(caption); Controls.Add(detail); Controls.Add(editor);
+            caption = title; detail = description; hasDescription = description.Length > 0; Editor = editor;
+            AccessibleName = title; AccessibleDescription = description; AccessibleRole = AccessibleRole.Grouping;
+            editor.AccessibleName = title; editor.AccessibleDescription = description; editor.BackColor = Palette.Elevated;
+            // Paint the card and its labels together instead of creating two
+            // extra native child windows per row that repaint independently.
+            Controls.Add(editor);
             editor.SizeChanged += delegate { if (!layingOut) PerformLayout(); };
             editor.Enter += delegate { EnsureVisible(); };
             foreach (Control child in editor.Controls) child.Enter += delegate { EnsureVisible(); };
             Height = 78;
+            ResumeLayout(true);
         }
         void EnsureVisible() { if (Parent?.Parent is SettingsScroller viewport) viewport.EnsureVisible(this); }
         bool layingOut;
@@ -91,7 +233,7 @@ namespace Chatter.App {
                 bool stacked = wide || (!compact && Width < Px(560));
                 int editorW = compact ? (Editor is SwitchBox ? Px(44) : Px(126)) : stacked ? available : Math.Min(Px(290), available * 45 / 100);
                 int textW = stacked ? available : Math.Max(1, available - editorW - gap);
-                if (measuredWidth != textW) { measuredWidth = textW; measuredTitle = PaintKit.Measure(caption.Text, caption.Font, textW).Height; measuredDetail = hasDescription ? PaintKit.Measure(detail.Text, detail.Font, textW).Height : 0; }
+                if (measuredWidth != textW) { measuredWidth = textW; measuredTitle = PaintKit.Measure(caption, UiFont.BodyStrong, textW).Height; measuredDetail = hasDescription ? PaintKit.Measure(detail, UiFont.Small, textW).Height : 0; }
                 int titleH = measuredTitle;
                 int descriptionH = measuredDetail;
                 int textH = titleH + (descriptionH > 0 ? Px(5) + descriptionH : 0);
@@ -99,12 +241,17 @@ namespace Chatter.App {
                 int height = stacked ? pad * 2 + textH + Px(12) + editorH : Math.Max(Px(76), pad * 2 + Math.Max(textH, editorH));
                 if (Height != height) Height = height;
                 int y = stacked ? pad : Math.Max(pad, (Height - textH) / 2);
-                caption.SetBounds(pad, y, textW, titleH + 1);
-                detail.SetBounds(pad, y + titleH + Px(5), textW, descriptionH + 1);
+                captionBounds = new Rectangle(pad, y, textW, titleH + 1);
+                detailBounds = new Rectangle(pad, y + titleH + Px(5), textW, descriptionH + 1);
                 Editor.SetBounds(stacked ? pad : Width - pad - editorW, stacked ? pad + textH + Px(12) : (Height - editorH) / 2, editorW, editorH);
             } finally { layingOut = false; }
         }
-        protected override void OnPaint(PaintEventArgs e) { e.Graphics.Clear(Palette.Bg); PaintKit.FillRound(e.Graphics, new Rectangle(0, 0, Width - 1, Height - 1), Px(10), Palette.Elevated); }
+        protected override void OnPaint(PaintEventArgs e) {
+            e.Graphics.Clear(Palette.Bg);
+            PaintKit.FillRound(e.Graphics, new Rectangle(0, 0, Width - 1, Height - 1), Px(10), Palette.Elevated);
+            TextRenderer.DrawText(e.Graphics, caption, UiFont.BodyStrong, captionBounds, Palette.Ink, PaintKit.Wrap);
+            if (hasDescription) TextRenderer.DrawText(e.Graphics, detail, UiFont.Small, detailBounds, Palette.Muted, PaintKit.Wrap);
+        }
     }
 
     sealed class SettingsText : UserControl {

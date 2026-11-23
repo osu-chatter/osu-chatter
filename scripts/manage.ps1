@@ -80,6 +80,8 @@ function Check-App {
     if ($ModernTranscriptCheck) {
         & $testsPath '--modern-transcript-test'
         if ($LASTEXITCODE -ne 0) { throw 'Modern transcript integration check failed.' }
+        & $testsPath '--settings-transition-test'
+        if ($LASTEXITCODE -ne 0) { throw 'Settings transition integration check failed.' }
     }
     Write-Host 'Checking startup...'
     Test-AppStartup $appPath

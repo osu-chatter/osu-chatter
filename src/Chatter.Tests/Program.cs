@@ -36,6 +36,8 @@ namespace Chatter.Tests {
             if (args.Length == 1 && args[0] == "--test-plamo") { Run("PLaMo CPU and Vulkan fixtures", ReleaseCandidateTests.Plamo); return failed == 0 ? 0 : 1; }
             if (args.Length == 1 && args[0] == "--commands-live") { Run("native command hook validation", ReleaseCandidateTests.CommandsLive); return failed == 0 ? 0 : 1; }
             if (args.Length == 1 && args[0] == "--modern-transcript-test") { Run("modern transcript integration", ModernTranscriptTests.Run); return failed == 0 ? 0 : 1; }
+            if (args.Length == 1 && args[0] == "--settings-transition-test") { Run("settings window transitions", SettingsTransitionTests.Run); return failed == 0 ? 0 : 1; }
+            if (args.Length == 2 && args[0] == "--settings-paint-test") { Run("settings retained pixels", () => SettingsPaintTests.Run(args[1])); return failed == 0 ? 0 : 1; }
             if (args.Length == 1 && args[0] == "--transcript-menu-test") { Run("translation target menu lifecycle", TranscriptMenuTests.TranslationTargets); return failed == 0 ? 0 : 1; }
             if (args.Length == 2 && args[0] == "--settings-shots") { Run("settings screenshots", () => SettingsTests.Render(args[1])); return failed == 0 ? 0 : 1; }
             if (args.Length == 2 && args[0] == "--inspect-commands-live") { Run("native command state (no send)", () => NativeBridgeInspection.Run(args[1])); return failed == 0 ? 0 : 1; }
@@ -54,6 +56,7 @@ namespace Chatter.Tests {
             Run("chat input deletes words with Ctrl+Backspace", UiTests.DeletePreviousWord);
             Run("embedded settings preserve chat draft", SettingsTests.Embedded);
             Run("inline provider settings and credential isolation", SettingsTests.Providers);
+            Run("settings selector keyboard, popup and accessibility", SettingsTests.PickerInteraction);
             Run("lazy settings and background model inventory", SettingsTests.LazyPages);
             Run("transcript keeps its place", UiTests.Transcript);
             Run("translation target menu lifecycle", TranscriptMenuTests.TranslationTargets);

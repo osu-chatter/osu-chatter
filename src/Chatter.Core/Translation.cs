@@ -61,6 +61,7 @@ namespace Chatter {
         public Translator() : this(url => (HttpWebRequest)WebRequest.Create(url)) { }
         internal Translator(Func<string, HttpWebRequest> factory) { createRequest = factory; }
         readonly LocalTranslator local = new LocalTranslator();
+        public string AccelerationStatus(ExperienceOptions options) => ai.AccelerationStatus(options);
         public event Action<string> Status { add { local.Status += value; } remove { local.Status -= value; } }
         public void PrepareLocal() { local.Prepare(); }
         public void Dispose() { local.Dispose(); ai.Dispose(); }

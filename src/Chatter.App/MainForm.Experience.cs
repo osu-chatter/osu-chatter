@@ -44,6 +44,8 @@ namespace Chatter.App {
                 else if (translating) text = "Translating · " + preferences.ProviderSummary().Replace("\n", " · ");
                 else text = "Translation ready · " + translations.Count + " completed" + (translationErrors.Count > 0 ? " · " + translationErrors.Count + " failed (right-click to retry)" : "");
             }
+            if (preferences.Endpoint == ChatRules.LocalTranslator) text += " · CPU (lightweight)";
+            else if (preferences.Endpoint == Translator.LocalModel) text += " · " + service.AccelerationStatus(preferences.Experience);
             if (preferences.Experience.NativeCommands) text += " · " + (commandsReady ? "/t ready" : !reading ? "/t paused" : snapshot?.MenuOrLobby == false ? "/t requires menus or lobby" : commandError.Length > 0 ? "/t unavailable" : "/t connecting");
             if (translationProgress.Text != text) translationProgress.Text = text;
         }

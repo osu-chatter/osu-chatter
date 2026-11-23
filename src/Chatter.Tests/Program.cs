@@ -32,6 +32,8 @@ namespace Chatter.Tests {
             if (args.Length == 1 && args[0] == "--translation-live") { Run("local translation", UiTests.LocalTranslation); return failed == 0 ? 0 : 1; }
             if (args.Length == 1 && args[0] == "--install-model") { Run("local AI install and fixtures", () => ReleaseCandidateTests.InstallModel()); return failed == 0 ? 0 : 1; }
             if (args.Length == 1 && args[0] == "--install-quality-model") { Run("quality local AI fixtures", () => ReleaseCandidateTests.InstallModel(true)); return failed == 0 ? 0 : 1; }
+            if (args.Length == 1 && args[0] == "--test-madlad") { Run("MADLAD CPU and Vulkan fixtures", ReleaseCandidateTests.Madlad); return failed == 0 ? 0 : 1; }
+            if (args.Length == 1 && args[0] == "--test-plamo") { Run("PLaMo CPU and Vulkan fixtures", ReleaseCandidateTests.Plamo); return failed == 0 ? 0 : 1; }
             if (args.Length == 1 && args[0] == "--commands-live") { Run("native command hook validation", ReleaseCandidateTests.CommandsLive); return failed == 0 ? 0 : 1; }
             if (args.Length == 1 && args[0] == "--modern-transcript-test") { Run("modern transcript integration", ModernTranscriptTests.Run); return failed == 0 ? 0 : 1; }
             if (args.Length == 1 && args[0] == "--transcript-menu-test") { Run("translation target menu lifecycle", TranscriptMenuTests.TranslationTargets); return failed == 0 ? 0 : 1; }
@@ -103,6 +105,7 @@ namespace Chatter.Tests {
             Run("bounded context and source hints", ReleaseCandidateTests.ContextAndHints);
             Run("release settings persistence", ReleaseCandidateTests.AdvancedPreferences);
             Run("chat translation endpoint, links and cache", ReleaseCandidateTests.ChatApiAndCache);
+            Run("custom GGUF detection and PLaMo prompt", ReleaseCandidateTests.CustomModels);
             Run("translation progress keeps transcript stable", ReleaseCandidateTests.StableProgress);
             Run("native command capture and unpatch", ReleaseCandidateTests.CommandHook);
             Run("replacement command hook survives old cleanup", ReleaseCandidateTests.ReplacedCommandHook);

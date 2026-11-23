@@ -26,6 +26,7 @@ namespace Chatter {
         public string ReplyShortcut { get; set; } = "Control, Shift, Enter";
         public string OverlayShortcut { get; set; } = "Control, Shift, O";
         public string ModelVariant { get; set; } = "fast";
+        public string EngineBackend { get; set; } = "cpu";
         public string DownloadDirectory { get; set; } = "";
         public string ModelPath { get; set; } = "";
         public string RuntimePath { get; set; } = "";
@@ -43,7 +44,8 @@ namespace Chatter {
         public void Validate() {
             new TranslationRequest { Endpoint = ChatEndpoint, Text = "test", Source = "en", Target = "pl" }.Validate();
             if (string.IsNullOrWhiteSpace(ChatModel) || ChatModel.Length > 200) throw new InvalidOperationException("Choose a valid chat model identifier.");
-            if (ModelVariant != "fast" && ModelVariant != "quality") throw new InvalidOperationException("Choose a valid local-model size.");
+            if (ModelVariant != "fast" && ModelVariant != "quality" && ModelVariant != "madlad" && ModelVariant != "plamo") throw new InvalidOperationException("Choose a valid local-model preset.");
+            if (EngineBackend != "cpu" && EngineBackend != "vulkan") throw new InvalidOperationException("Choose a valid local engine.");
             if (!new[] { "translation", "both", "original" }.Contains(NativePresentation)
                 || !new[] { "new", "recent", "all" }.Contains(HistoryPolicy)
                 || (IncomingSource != "auto" && Array.IndexOf(ChatRules.Languages, IncomingSource) < 0)

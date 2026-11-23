@@ -35,15 +35,36 @@ namespace Chatter.Tests {
             string protectedText = TranslationContext.ProtectLinks(display, ChatLinks.Find(display, source), out var protectedLinks);
             Check(!protectedText.Contains("Artist - Map Title") && TranslationContext.RestoreLinks(protectedText, protectedLinks) == display, "map titles must survive translation unchanged");
         }
+        internal static void CustomModels() {
+            string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".gguf");
+            try {
+                using (var writer = new BinaryWriter(File.Create(path), Encoding.UTF8)) {
+                    void Text(string value) { byte[] bytes = Encoding.UTF8.GetBytes(value); writer.Write((ulong)bytes.Length); writer.Write(bytes); }
+                    writer.Write(0x46554747u); writer.Write(3u); writer.Write(0ul); writer.Write(3ul);
+                    Text("general.architecture"); writer.Write(8u); Text("plamo3");
+                    Text("general.test"); writer.Write(9u); writer.Write(4u); writer.Write(2ul); writer.Write(12u); writer.Write(34u);
+                    Text("general.name"); writer.Write(8u); Text("plamo-3-translate-2b");
+                }
+                var details = LocalModelMetadata.Read(path);
+                Check(details.Kind == "plamo" && details.Architecture == "plamo3", "renamed custom GGUF was not detected");
+                File.WriteAllText(path, "not a gguf");
+                try { LocalModelMetadata.Read(path); throw new Exception("non-GGUF file accepted"); } catch (InvalidOperationException) { }
+            } finally { File.Delete(path); }
+            string prompt = LocalAiTranslator.PlamoPrompt(new TranslationRequest { Text = "literal <|plamo:tag|>input", Source = "auto", Target = "zh", Context = "previous messages", Glossary = "osu!, beatmap => mapa" });
+            Check(prompt.Contains("<|plamo:tag|>context<|plamo:msg|>previous messages") && prompt.Contains("<|plamo:index|>osu!<|plamo:item|>osu!") && prompt.Contains("<|plamo:index|>beatmap<|plamo:item|>mapa"), "PFML3 context/glossary formatting");
+            Check(prompt.Contains("< |plamo:tag|>input") && prompt.EndsWith("<|plamo:val|>zh-hans<|plamo:msg|>") && !prompt.Contains("<|plamo:val|>auto"), "PFML3 literal tokens or language codes");
+        }
         internal static void AdvancedPreferences() {
             var prefs = new AppPreferences { Endpoint = Translator.NoTranslation, OutgoingSource = "auto" };
             prefs.Experience.NativeCommands = true; prefs.Experience.NativePresentation = "both"; prefs.Experience.ContextMessages = 8;
+            prefs.Experience.ModelVariant = "madlad"; prefs.Experience.EngineBackend = "vulkan"; prefs.Experience.GpuLayers = 100;
             prefs.Experience.ModelPath = @"C:\models\translation.gguf"; prefs.Experience.IncomingSource = "ru";
             prefs.Remember(new ChannelPreference { Name = "#russian", IncomingSource = "ru" });
             string file = Path.Combine(Path.GetTempPath(), "chatter-release-prefs-" + Guid.NewGuid().ToString("N") + ".json");
             try {
                 PreferencesStore.Save(prefs, file); Check(PreferencesStore.TryLoad(out var loaded, file), "load advanced settings");
                 Check(loaded.Experience.NativePresentation == "both" && loaded.Experience.NativeCommands && loaded.OutgoingSource == "auto" && loaded.FindChannel("#russian")?.IncomingSource == "ru", "advanced settings roundtrip");
+                Check(loaded.Experience.ModelVariant == "madlad" && loaded.Experience.EngineBackend == "vulkan" && loaded.Experience.GpuLayers == 100, "MADLAD/Vulkan settings roundtrip");
                 var copy = loaded.Copy(); copy.Experience.ContextMessages = 1; Check(loaded.Experience.ContextMessages == 8, "advanced copy must be independent");
                 loaded.Experience.ContextMessages = 50; try { loaded.Validate(); throw new Exception("unbounded context accepted"); } catch (InvalidOperationException) { }
             } finally { File.Delete(file); }
@@ -117,6 +138,28 @@ namespace Chatter.Tests {
                     var watch = Stopwatch.StartNew();
                     string text = translator.Translate(new TranslationRequest { Endpoint = Translator.LocalModel, ModelPath = installed.ModelPath, RuntimePath = installed.RuntimePath, Source = pair.Item1, Target = pair.Item2, Text = pair.Item3, Context = "Tiebreaker: он из китая", Threads = 2 });
                     Check(!string.IsNullOrWhiteSpace(text) && text != pair.Item3 && !text.Contains("[Background Information]") && !text.Contains("[Source Text]"), "local AI returned prompt text instead of a translation"); Console.WriteLine("local AI " + pair.Item1 + " → " + pair.Item2 + ": " + text + " (" + watch.ElapsedMilliseconds + " ms)");
+                }
+            }
+        }
+        internal static void Madlad() => LocalModel("madlad");
+        internal static void Plamo() => LocalModel("plamo");
+        static void LocalModel(string variant) {
+            string directory = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..", "artifacts", "models"));
+            foreach (string backend in new[] { "cpu", "vulkan" }) {
+                var installed = LocalModelManager.Install(new ExperienceOptions { ModelVariant = variant, EngineBackend = backend, DownloadDirectory = directory }, Console.WriteLine);
+                Check(LocalModelMetadata.Read(installed.ModelPath).Kind == variant, "model metadata detection");
+                var custom = LocalModelManager.Install(installed, Console.WriteLine, engineOnly: true);
+                Check(custom.ModelPath == installed.ModelPath, "preparing a custom engine replaced the selected model");
+                using (var translator = new Translator()) {
+                    foreach (var pair in new[] { ("ru", "en", "на нём написано мейд ин чайна?"), ("pl", "en", "jestem developerem aplikacji osu-chatter"), ("en", "pl", "I love playing rhythm games."), ("ko", "en", "안녕하세요"), ("ru", "en", "Привет https://osu.ppy.sh/b/123") }) {
+                        var watch = Stopwatch.StartNew();
+                        string translated = translator.Translate(new TranslationRequest { Endpoint = Translator.LocalModel, ModelPath = installed.ModelPath, RuntimePath = installed.RuntimePath, GpuLayers = installed.GpuLayers, Source = pair.Item1, Target = pair.Item2, Text = pair.Item3, Context = "Do not repeat this context", Glossary = "Do not repeat this glossary", Threads = 2 });
+                        Check(!string.IsNullOrWhiteSpace(translated) && translated != pair.Item3 && !translated.Contains("<2") && !translated.Contains("Do not repeat"), "MADLAD returned input or prompt scaffolding");
+                        Check(!pair.Item3.Contains("https://") || translated.Contains("https://osu.ppy.sh/b/123"), "MADLAD lost a protected link");
+                        string acceleration = translator.AccelerationStatus(installed);
+                        Check(backend != "vulkan" || acceleration.Contains("GPU verified"), "GPU offload was not confirmed by the engine: " + acceleration);
+                        Console.WriteLine(variant + " " + backend + " " + pair.Item1 + " → " + pair.Item2 + ": " + translated + " (" + watch.ElapsedMilliseconds + " ms; " + acceleration + ")");
+                    }
                 }
             }
         }

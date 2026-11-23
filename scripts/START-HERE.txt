@@ -8,6 +8,9 @@ osu!lazer is not supported. Select one of those conversations in Chatter.
 On first launch, choose a provider and languages. Settings has Translation,
 In-game chat, Overlay, Application, Models and About inside the main window.
 Save changes (Ctrl+S) applies settings; Back to chat/Esc discards unsaved edits.
+Settings sections keep their scroll positions when switching between sections.
+Chat keeps your reading position during updates, resizing and visiting Settings;
+Jump to latest resumes following new messages.
 
 For free local AI: Models -> choose folder, Fast/Quality/MADLAD/PLaMo and CPU/Vulkan -> install;
 then Translation -> Local AI -> save. Models are separate large downloads.

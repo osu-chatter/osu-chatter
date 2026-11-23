@@ -57,10 +57,19 @@ namespace Chatter.App {
         void OpenAdvancedSettings() {
             if (settingsView != null) { settingsView.Focus(); return; }
             if (busy) { notice = "Finish the current send before changing settings."; Render(); return; }
-            var view = new SettingsView(preferences, selected, new Size(Math.Max(1, ClientSize.Width - Px(252)), ClientSize.Height)); settingsView = view; settingsOpen = true;
+            settingsOpen = true;
+            LayoutChrome();
+            SettingsView view;
+            try { view = new SettingsView(preferences, selected, new Size(Math.Max(1, ClientSize.Width - Px(252)), ClientSize.Height)) { Visible = false }; }
+            catch { settingsOpen = false; LayoutChrome(); throw; }
+            settingsView = view;
             view.BackRequested += delegate { CloseEmbeddedSettings(); };
             view.Saved += ApplySettings;
-            Controls.Add(view); settingsButton.Filled = true; LayoutChrome(); view.Focus();
+            SuspendLayout();
+            try { Controls.Add(view); settingsButton.Filled = true; LayoutChrome(); view.Visible = true; }
+            finally { ResumeLayout(true); }
+            view.Focus();
+            PaintKit.Redraw(this);
         }
         void ApplySettings(AppPreferences updated) {
             if (busy) throw new InvalidOperationException("Finish the current send before saving settings.");
@@ -76,9 +85,12 @@ namespace Chatter.App {
             KickAuto();
         }
         void CloseEmbeddedSettings(bool render = true) {
+            settingsView?.Hide();
             var view = settingsView; settingsView = null; settingsOpen = false; settingsButton.Filled = false;
-            if (view != null) { Controls.Remove(view); view.Dispose(); }
             if (render) { Render(); KickAuto(); draft.Input.Focus(); }
+            if (view != null) { Controls.Remove(view); view.Dispose(); }
+            Invalidate(new Rectangle(Px(252), 0, Math.Max(0, ClientSize.Width - Px(252)), ClientSize.Height), true);
+            PaintKit.Redraw(this);
         }
         protected override bool ProcessCmdKey(ref Message msg, Keys keyData) {
             if (keyData == (Keys.Control | Keys.S) && settingsView != null) { settingsView.SaveChanges(); return true; }

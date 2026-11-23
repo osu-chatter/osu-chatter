@@ -15,7 +15,7 @@ namespace Chatter.App {
             if (manual) { names = new[] { "Same as automatic" }.Concat(names).ToArray(); codes = new[] { "" }.Concat(codes).ToArray(); }
             string original = manual ? working.ManualEndpoint : working.Endpoint;
             string selected = original.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? "custom" : original;
-            var picker = new DarkPicker { Name = manual ? "Manual provider" : "Automatic provider" }; picker.Items.AddRange(names); picker.SelectedIndex = Math.Max(0, Array.IndexOf(codes, selected));
+            var picker = new SettingsPicker { Name = manual ? "Manual provider" : "Automatic provider" }; picker.Items.AddRange(names); picker.SelectedIndex = Math.Max(0, Array.IndexOf(codes, selected));
             AddRow(page, manual ? "Translate button" : "Automatic engine", manual ? "Optional engine for messages you translate manually." : "Used for incoming chat and your outgoing drafts.", picker);
             var help = new Label { AutoSize = true, Font = UiFont.Small, ForeColor = Palette.Muted, MaximumSize = new System.Drawing.Size(650, 0), Margin = new Padding(3, 0, 3, 14) };
             page.Controls.Add(help);

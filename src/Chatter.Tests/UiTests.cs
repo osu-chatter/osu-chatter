@@ -120,6 +120,11 @@ namespace Chatter.Tests {
                 var messages = Messages(40);
                 Action apply = () => Call(form, "Apply", new ChatSnapshot(1, true, "Me", new[] { new ChatChannel("#osu", false, true, new List<ChatMessage>(messages)) }));
                 apply();
+                var rail=(Control)Get(form,"rail"); int railRepaints=0;
+                var railHandle=rail.Handle;
+                rail.Invalidated += delegate { railRepaints++; };
+                Call(form,"ToggleRead");
+                Check(railRepaints>0,"pause status did not repaint unchanged conversation rail");
                 var view = (Control)Get(form, "transcript");
                 Call(view, "ScrollBy", 900);
                 var anchor = Anchor(view);
@@ -197,6 +202,14 @@ namespace Chatter.Tests {
         }
         public static void Profiles() {
             using (var view = View()) {
+                using(var directory=new PlayerDirectory(view)) {
+                    int changes=0, frames=0;
+                    directory.Changed += delegate { changes++; };
+                    directory.AnimationFrame += delegate { frames++; };
+                    for(int i=0;i<50;i++) Call(directory,"OnFrame",null!,EventArgs.Empty);
+                    Application.DoEvents();
+                    Check(changes==0 && frames==1,"avatar animation rebuilt profiles or flooded the UI queue");
+                }
                 string playing = "is playing xi - Blue Zenith [FOUR DIMENSIONS]";
                 string source = "[https://osu.ppy.sh/b/658127 " + playing + "]";
                 var messages = new List<ChatMessage> {

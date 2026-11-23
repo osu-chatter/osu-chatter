@@ -95,6 +95,8 @@ The opt-in `--test-madlad` and `--test-plamo` checks install the corresponding Q
 
 Run `check.bat -NoPause -ModernTranscriptCheck` to also exercise the real WebView2 transcript when the runtime is installed. The [compatibility guide](docs/stable-compatibility.md) records the current signatures, offsets and reflected members, and explains manual maintenance and live verification. The separate [daily compatibility watch](docs/stable-compatibility.md#stable-compatibility-workflow) is an early update alert, not a required merge check or a live game test.
 
+For repaint changes, run `src\Chatter.Tests\bin\Release\net48\Chatter.Tests.exe --settings-paint-test artifacts\settings-paint` on an unlocked Windows desktop. This opt-in check briefly shows a fixture window and compares retained screen pixels after scrolling and section changes against a complete repaint, saving images on failure. Ordinary `DrawToBitmap` screenshots force painting and can hide stale-pixel defects. The fixture uses synthetic model listings and does not send messages or change saved preferences.
+
 Keep pull requests focused. Explain user-visible changes and mention which checks you ran.
 
 ## Keeping documentation current

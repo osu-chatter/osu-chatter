@@ -37,7 +37,7 @@ namespace Chatter.App {
         int Px(int v) => (int)Math.Round(v * DeviceDpi / 96.0);
         public SettingsView(AppPreferences preferences, string channel, Size? initialSize = null) {
             working = preferences.Copy(); Result = working.Copy();
-            Name = "SettingsView"; Font = UiFont.Body; BackColor = Palette.Bg; ForeColor = Palette.Ink;
+            Name = "SettingsView"; AccessibleName = "Settings"; Font = UiFont.Body; BackColor = Palette.Bg; ForeColor = Palette.Ink;
             Size = initialSize ?? new Size(848, 720);
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
             SuspendLayout();
@@ -182,8 +182,8 @@ namespace Chatter.App {
                 } catch (Exception ex) { if (!IsDisposed && !Disposing && generation == modelStatsGeneration) installedModels.Text = ex.Message; }
             };
             refreshModels(); Button(models, "Refresh downloaded models", refreshModels);
-            var pairFrom = new DarkPicker { Width = 640 }; pairFrom.Items.AddRange(ChatRules.LanguageNames); pairFrom.SelectedIndex = 0; AddRow(models, "Download from", "Source language for the lightweight model.", pairFrom);
-            var pairTo = new DarkPicker { Width = 640 }; pairTo.Items.AddRange(ChatRules.LanguageNames); pairTo.SelectedIndex = 1; AddRow(models, "Download to", "Target language. English pivot pairs are included.", pairTo);
+            var pairFrom = new SettingsPicker { Width = 640 }; pairFrom.Items.AddRange(ChatRules.LanguageNames); pairFrom.SelectedIndex = 0; AddRow(models, "Download from", "Source language for the lightweight model.", pairFrom);
+            var pairTo = new SettingsPicker { Width = 640 }; pairTo.Items.AddRange(ChatRules.LanguageNames); pairTo.SelectedIndex = 1; AddRow(models, "Download to", "Target language. English pivot pairs are included.", pairTo);
             Note(models, "Pre-download a lightweight language pair before playing. Non-English pairs also prepare the English pivot models.");
             Button(models, "Pre-download lightweight language pair", async () => {
                 if (downloading) return;
@@ -239,17 +239,22 @@ namespace Chatter.App {
         }
         internal void SelectPage(int index) {
             index = Math.Max(0, Math.Min(index, pages.Count - 1));
-            var build = pageBuilders[index];
-            if (build != null) {
-                pageBuilders[index] = null;
-                pages[index].Content.SuspendLayout();
-                try { build(); } finally { pages[index].Content.ResumeLayout(true); }
-            }
-            navigation.SelectSection(index);
-            for (int i = 0; i < pages.Count; i++) pages[i].Visible = i == index;
-            pageTitle.Text = navigation.Sections[index];
-            pageDetail.Text = new[] { "Choose how messages are translated and which languages you use.", "Read translations and send commands in osu!’s own chat.", "Make the overlay comfortable to read and interact with.", "Appearance, notifications and everyday shortcuts.", "Download and manage engines that run on your PC.", "App version, updates and compatibility information." }[index];
-            PerformLayout();
+            SuspendLayout();
+            try {
+                var build = pageBuilders[index];
+                if (build != null) {
+                    pageBuilders[index] = null;
+                    pages[index].Content.SuspendLayout();
+                    try { build(); } finally { pages[index].Content.ResumeLayout(true); }
+                }
+                navigation.SelectSection(index);
+                // Prepare and reveal the new section before hiding the previous one.
+                pages[index].BringToFront(); pages[index].Visible = true;
+                for (int i = 0; i < pages.Count; i++) if (i != index) pages[i].Visible = false;
+                pageTitle.Text = navigation.Sections[index];
+                pageDetail.Text = new[] { "Choose how messages are translated and which languages you use.", "Read translations and send commands in osu!’s own chat.", "Make the overlay comfortable to read and interact with.", "Appearance, notifications and everyday shortcuts.", "Download and manage engines that run on your PC.", "App version, updates and compatibility information." }[index];
+            } finally { ResumeLayout(true); }
+            PaintKit.Redraw(this);
         }
         internal void SelectPage(string name) { int at = Array.IndexOf(navigation.Sections, name); if (at >= 0) SelectPage(at); }
         protected override void OnLayout(LayoutEventArgs e) {
@@ -281,8 +286,8 @@ namespace Chatter.App {
             page.SetBounds(x, Px(188), width, Math.Max(1, Height - Px(266)));
         }
         SettingsRow AddRow(FlowLayoutPanel page, string title, string description, Control editor, bool wide = false) {
-            var row = new SettingsRow(title, description, editor, wide) { Width = Math.Max(1, page.Width) }; page.Controls.Add(row);
-            if (editor is DarkPicker picker) picker.ScrollRequested = delta => ((SettingsScroller)page.Parent).ScrollBy(delta / 3);
+            var row = new SettingsRow(title, description, editor, wide, Math.Max(1, page.Width)); page.Controls.Add(row);
+            if (editor is SettingsPicker picker) picker.ScrollRequested = delta => ((SettingsScroller)page.Parent).ScrollBy(delta / 3);
             return row;
         }
         void Heading(FlowLayoutPanel page, string title) => page.Controls.Add(new Label { Text = title.ToUpperInvariant(), Font = UiFont.Section, ForeColor = Palette.Muted, Height = Px(26), Margin = new Padding(0, Px(15), 0, Px(6)) });
@@ -298,8 +303,8 @@ namespace Chatter.App {
             var input = new SettingsNumber(min, max, value); AddRow(page, caption, description, input); input.Changed += MarkChanged; save.Add(() => setter(input.Value));
             return input;
         }
-        DarkPicker Choice(FlowLayoutPanel page, string caption, string[] labels, string[] values, string current, Action<string> setter) {
-            var combo = new DarkPicker { Name = caption }; combo.Items.AddRange(labels); combo.SelectedIndex = Math.Max(0, Array.IndexOf(values, current));
+        SettingsPicker Choice(FlowLayoutPanel page, string caption, string[] labels, string[] values, string current, Action<string> setter) {
+            var combo = new SettingsPicker { Name = caption }; combo.Items.AddRange(labels); combo.SelectedIndex = Math.Max(0, Array.IndexOf(values, current));
             AddRow(page, caption, "", combo); combo.SelectedIndexChanged += delegate { setter(values[combo.SelectedIndex]); MarkChanged(); }; save.Add(() => setter(values[combo.SelectedIndex])); return combo;
         }
         void Source(FlowLayoutPanel page, string label, string current, Action<string> setter) {

@@ -13,6 +13,7 @@
     <Reference Include="System.Web.Extensions" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <EmbeddedResource Include="Resources\chatter.ico" LogicalName="Chatter.App.Resources.chatter.ico" />
+    <EmbeddedResource Include="Resources\Transcript.html" LogicalName="Chatter.App.Transcript.html" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Chatter.Core\Chatter.Core.csproj" />

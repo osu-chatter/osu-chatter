@@ -51,6 +51,8 @@ namespace Chatter.App {
         string? cachedDir;
 
         public event Action? Changed;
+        public event Action? AnimationFrame;
+        int framePending;
 
         public PlayerDirectory(Control ui) {
             this.ui = ui;
@@ -254,10 +256,14 @@ namespace Chatter.App {
         }
 
         void OnFrame(object? sender, EventArgs e) {
-            if (disposed) return;
+            if (disposed || Interlocked.Exchange(ref framePending, 1) != 0) return;
             try {
-                if (!ui.IsDisposed && ui.IsHandleCreated) ui.BeginInvoke(new Action(Raise));
+                if (!ui.IsDisposed && ui.IsHandleCreated) {
+                    ui.BeginInvoke(new Action(() => { Interlocked.Exchange(ref framePending, 0); if (!disposed) AnimationFrame?.Invoke(); }));
+                    return;
+                }
             } catch (InvalidOperationException) { }
+            Interlocked.Exchange(ref framePending, 0);
         }
 
         void Raise() {

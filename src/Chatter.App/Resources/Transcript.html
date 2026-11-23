@@ -1,0 +1,160 @@
+<!doctype html><html><head><meta charset='utf-8'><meta http-equiv='Content-Security-Policy' content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><style>
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:#0c0d10;color:#f3f4f6;font:14px 'Segoe UI','Segoe UI Emoji',sans-serif}body{overflow:hidden}#log{height:100%;overflow:auto;padding:20px 24px 65px;scrollbar-color:#414650 #0c0d10;overflow-anchor:none}article{display:flex;gap:10px;margin:0 0 18px;align-items:flex-end}article.own{justify-content:flex-end}article.system{justify-content:center;color:#78808e;font-size:12px}.avatar{width:30px;height:30px;border-radius:50%;object-fit:cover;background:#262c37;display:grid;place-items:center;flex:none;color:#b0bac9}.avatar.gold{border:2px solid #e8c47a}.content{max-width:80%;min-width:80px}.sender{color:#a0a9b9;font-size:12px;margin:0 0 5px 3px;background:none;border:0;padding:0;cursor:pointer}.bubble{border:1px solid #282e39;border-radius:12px;background:#1c2028;padding:11px 14px;overflow-wrap:anywhere;line-height:1.5}.own .bubble{background:#4a1c2a;border-color:#672d41}.body,.translation{white-space:pre-wrap;unicode-bidi:plaintext}.translation{border-top:1px solid #ffffff24;margin-top:10px;padding-top:8px;color:#d6dbe4}.meta{display:flex;gap:10px;justify-content:space-between;color:#929baa;font-size:11px;margin-top:7px}.error{color:#fecdd3;font-size:12px;margin-top:8px}a{color:inherit;text-decoration-color:#8b9bac;text-underline-offset:3px}a:hover{color:#fff;text-decoration-color:#e11d48}button{font:inherit;cursor:pointer}.translate{background:none;border:0;color:#a7b0c0;padding:0;font-size:11px}.state{color:#7c8798}#latest{position:absolute;right:20px;bottom:16px;border:1px solid #4c5360;border-radius:20px;background:#252a34;color:#fff;padding:8px 15px;box-shadow:0 4px 18px #0007}#search{position:absolute;top:8px;right:20px;z-index:2;padding:8px;border:1px solid #454d5c;border-radius:8px;background:#181b22}#search input{background:#1e222b;color:white;border:0;outline:0;font:inherit}#menu{position:absolute;z-index:3;background:#1e222b;border:1px solid #454d5c;border-radius:9px;padding:5px;box-shadow:0 8px 30px #0008}#menu button{display:block;text-align:left;background:none;border:0;color:#eee;padding:8px 14px;width:100%}#menu button:hover{background:#353b48}#empty{text-align:center;color:#838d9f;padding:60px 20px}small{color:#8893a5}article.action .body{font-style:italic} [hidden]{display:none!important}
+</style></head><body><div id='log'><div id='empty'></div></div><button id='latest' hidden>Jump to latest ↓</button><div id='search' hidden><input placeholder='Find in this conversation'><button>×</button></div><div id='menu' hidden></div><script>
+const log = document.querySelector('#log'), jump = document.querySelector('#latest'), menu = document.querySelector('#menu');
+let rows = new Map(), pinned = true, readingAnchor = null, visibleTimer = 0, lastVisible = '';
+const visibleIds = new Set();
+function post(action, id = '', value = '') { chrome.webview.postMessage({ action, id, value }); }
+// IntersectionObserver avoids measuring every message on every wheel/scroll frame.
+function visible() {
+    if (visibleTimer) return;
+    visibleTimer = setTimeout(() => {
+        visibleTimer = 0;
+        const ids = [...rows.keys()].filter(id => visibleIds.has(id)), signature = JSON.stringify(ids);
+        if (signature !== lastVisible) { lastVisible = signature; chrome.webview.postMessage({ action: 'visible', ids }); }
+    }, 60);
+}
+const intersections = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+        if (entry.isIntersecting) visibleIds.add(entry.target.dataset.id);
+        else visibleIds.delete(entry.target.dataset.id);
+    }
+    visible();
+}, { root: log });
+function anchor() {
+    const top = log.scrollTop, items = log.children;
+    let low = 0, high = items.length;
+    while (low < high) {
+        const mid = (low + high) >>> 1, e = items[mid];
+        if (e.offsetTop + e.offsetHeight < top) low = mid + 1; else high = mid;
+    }
+    const e = items[low];
+    return e?.dataset.id ? { id: e.dataset.id, offset: e.offsetTop - top } : null;
+}
+function restore(saved, bottom) {
+    if (!log.clientHeight) return;
+    if (bottom) log.scrollTop = log.scrollHeight;
+    else if (saved) log.scrollTop = rows.has(saved.id) ? rows.get(saved.id).offsetTop - saved.offset : 0;
+    pinned = log.scrollHeight - log.scrollTop - log.clientHeight < 35;
+    jump.hidden = pinned;
+    readingAnchor = anchor();
+}
+function element(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+}
+function linked(e, text, links) {
+    let at = 0;
+    for (const l of links || []) {
+        if (l.Index < at) continue;
+        e.append(document.createTextNode(text.slice(at, l.Index)));
+        const a = element('a', '', text.slice(l.Index, l.Index + l.Length));
+        a.href = l.Url; a.title = l.Url;
+        a.onclick = v => { v.preventDefault(); post('open', '', l.Url); };
+        e.append(a); at = l.Index + l.Length;
+    }
+    e.append(document.createTextNode(text.slice(at)));
+}
+function context(e, r) {
+    e.oncontextmenu = v => {
+        v.preventDefault(); menu.replaceChildren();
+        for (const [label, action, value] of [
+            ['Copy message', 'copy', r.text], ['Copy translation', 'copy', r.translated],
+            ['Copy link', 'copy', r.links?.[0]?.Url], ['Translate again with context', 'translate', ''],
+            ['Translate to…', 'translate-to', ''], ['Open osu! profile', 'profile', '']
+        ]) {
+            if (value === undefined || value === null) continue;
+            const b = element('button', '', label);
+            b.onclick = () => { post(action, r.id, value || ''); menu.hidden = true; };
+            menu.append(b);
+        }
+        menu.hidden = false;
+        menu.style.left = Math.max(0, Math.min(v.clientX, innerWidth - menu.offsetWidth)) + 'px';
+        menu.style.top = Math.max(0, Math.min(v.clientY, innerHeight - menu.offsetHeight)) + 'px';
+    };
+}
+function patch(e, r, data) {
+    // Keep the body, selection and animated avatar alive when only translation/status changes.
+    const signature = JSON.stringify([r.sender, r.text, r.time, r.system, r.own, r.action, r.avatar, r.supporter, r.links, data.showTranslate]);
+    if (e.dataset.signature !== signature) {
+        e.dataset.signature = signature; e.replaceChildren();
+        e.className = r.system ? 'system' : r.own ? 'own' : '';
+        if (r.action) e.classList.add('action');
+        if (r.system) e.append(element('span', '', r.text));
+        else {
+            if (!r.own) {
+                const a = r.avatar ? element('img', 'avatar' + (r.supporter ? ' gold' : '')) : element('span', 'avatar' + (r.supporter ? ' gold' : ''), [...r.sender][0] || '?');
+                if (r.avatar) a.src = data.avatars?.[r.avatar] || r.avatar;
+                a.onclick = () => post('profile', r.id); e.append(a);
+            }
+            const content = element('div', 'content'), sender = element('button', 'sender', r.sender);
+            sender.onclick = () => post('profile', r.id); content.append(sender);
+            const bubble = element('div', 'bubble'), body = element('div', 'body');
+            body.dir = 'auto'; linked(body, r.text, r.links); bubble.append(body);
+            const tr = element('div', 'translation'); tr.dir = 'auto'; bubble.append(tr);
+            bubble.append(element('div', 'error'));
+            const meta = element('div', 'meta');
+            if (data.showTranslate && !r.own) {
+                const b = element('button', 'translate'); b.onclick = () => post('translate', r.id); meta.append(b);
+            }
+            meta.append(element('span', 'state')); meta.append(element('span', '', r.time.slice(0, 5)));
+            bubble.append(meta); content.append(bubble); e.append(content);
+        }
+    }
+    if (!r.system) {
+        for (const [selector, text] of [['.translation', r.translated && r.translated !== r.text ? r.translated : ''], ['.error', r.error || ''], ['.state', r.state || '']]) {
+            const part = e.querySelector(selector);
+            if (part.textContent !== text) part.textContent = text;
+            part.hidden = !text;
+        }
+        const button = e.querySelector('.translate');
+        if (button) { const text = r.translated ? 'Translate again' : 'Translate'; if (button.textContent !== text) button.textContent = text; }
+    }
+    context(e, r);
+}
+window.update = data => {
+    const bottom = log.clientHeight ? log.scrollHeight - log.scrollTop - log.clientHeight < 35 : pinned;
+    const saved = log.clientHeight ? anchor() : readingAnchor;
+    const font = data.font + 'px';
+    if (document.body.style.fontSize !== font) { document.documentElement.style.fontSize = font; document.body.style.fontSize = font; }
+    const next = new Map();
+    // Read scroll geometry before making any DOM writes; restore once after the batch.
+    for (const r of data.rows) {
+        let e = rows.get(r.id);
+        if (!e) { e = element('article'); e.dataset.id = r.id; intersections.observe(e); }
+        patch(e, r, data); next.set(r.id, e);
+    }
+    for (const [id, e] of rows) if (!next.has(id)) { intersections.unobserve(e); visibleIds.delete(id); e.remove(); }
+    let preceding = null;
+    for (const e of next.values()) {
+        const expected = preceding ? preceding.nextSibling : log.firstChild;
+        if (expected !== e) log.insertBefore(e, expected);
+        preceding = e;
+    }
+    rows = next;
+    let empty = document.querySelector('#empty');
+    if (!data.rows.length) {
+        if (!empty) { empty = element('div'); empty.id = 'empty'; log.append(empty); }
+        empty.textContent = data.empty || 'No messages yet';
+    } else empty?.remove();
+    if (data.stick) { pinned = true; readingAnchor = null; }
+    restore(saved, data.stick || bottom); visible();
+};
+log.onscroll = () => {
+    if (!log.clientHeight) return;
+    pinned = log.scrollHeight - log.scrollTop - log.clientHeight < 35;
+    jump.hidden = pinned; readingAnchor = anchor();
+};
+new ResizeObserver(() => restore(readingAnchor, pinned)).observe(log);
+jump.onclick = () => restore(null, true);
+document.onclick = e => { if (!menu.contains(e.target)) menu.hidden = true; };
+window.showSearch = () => { const s = document.querySelector('#search'); s.hidden = false; s.querySelector('input').focus(); };
+document.querySelector('#search button').onclick = () => document.querySelector('#search').hidden = true;
+document.querySelector('#search input').onkeydown = e => {
+    if (e.key === 'Enter') { e.preventDefault(); window.find(e.target.value, false, e.shiftKey, true); }
+    if (e.key === 'Escape') document.querySelector('#search').hidden = true;
+};
+post('ready');
+</script></body></html>

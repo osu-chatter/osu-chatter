@@ -1,110 +1,62 @@
 # Contributing
 
-Bug reports, documentation improvements, and pull requests are welcome. This guide defines the expected workflow so the history and release branch stay easy to review.
+Bug reports, fixes and documentation improvements are welcome. For a bug, include the Chatter version, Windows version, osu!stable build when relevant, steps to reproduce and what you expected to happen. Check existing issues first and remove private chat, API keys and personal data from attachments.
+
+Open an issue before starting a feature or a change that needs discussion. Small typo fixes and clearly scoped maintenance can go straight to a pull request.
+
+## Build and check
+
+Use 64-bit Windows with the .NET 10 SDK or newer and .NET Framework 4.8. Install the .NET Framework 4.8 Developer Pack if the build reports `MSB3644`.
+
+From the repository folder:
+
+```powershell
+.\run.bat -NoPause
+```
+
+This builds Release and launches Chatter. The other launchers are:
+
+| Command | Purpose |
+| --- | --- |
+| `build.bat -NoPause` | Build Release |
+| `check.bat -NoPause` | Build, run offline checks and check app startup |
+| `check.bat -NoPause -ModernTranscriptCheck` | Also check the real WebView2 chat view and settings transitions |
+| `package.bat -NoPause` | Build, check and create a local ZIP in `dist/` |
+
+Without `-NoPause`, the launchers wait before closing so they can be used by double-clicking. They all use [scripts/manage.ps1](scripts/manage.ps1).
+
+Routine checks use fixtures and don't need osu! or paid translation credentials. For direct commands, repaint checks, model tests and live-game probes, see [Development checks](docs/development.md).
 
 ## Branch and pull request workflow
 
-`main` is the default and release branch. Keep it buildable and ready to release. Do not do feature work or routine fixes directly on `main`; make a branch and merge it back through a pull request. In GitHub repository settings, protect `main` by requiring pull requests and the successful `Build and release / build` check before merging. Require the branch to be up to date if practical, and disable force pushes and branch deletion for `main`.
+Start from an up-to-date `main` and make a branch for each issue or coherent change, such as `fix/translation-cache` or `docs/model-setup`. Open a PR against `main`; keep it draft while work or required checks are outstanding. Link the issue with `Closes #123` when applicable.
 
-For each change:
-
-1. Start from an up-to-date `main` branch: `git switch main` then `git pull`.
-2. Create one branch for one issue or coherent change. Use a lowercase prefix and short kebab-case description:
-   - `feat/add-language-picker`
-   - `fix/translation-cache-growth`
-   - `docs/contributor-workflow`
-   - `refactor/shared-chat-rules`
-   - `chore/update-dependencies`
-3. Make small, focused commits using the format below. Do not mix unrelated cleanup into a feature or fix.
-4. Push the branch and open a pull request with `main` as the base. Open a draft PR early when feedback would help; mark it ready when the changes and checks are complete.
-5. Set the PR title in the same Conventional Commits format as the commit subject; CI rejects titles that do not match. Review the diff, respond to feedback, and keep the PR checks green. Merge with **Squash and merge** so the PR title becomes one clean commit on `main`. Delete the feature branch after merging.
-
-Use an issue first for bugs, features, and changes that need discussion or span multiple steps. Small typo fixes and clearly scoped maintenance can go straight to a PR. When a PR addresses an issue, link it with `Closes #123` in the PR description. Keep each PR focused enough to review as one unit; split independently useful changes into separate PRs.
-
-Do not commit generated output, local settings, credentials, chat contents, or private user data. Before opening a PR, check `git status` and `git diff` so only intended source and documentation changes are included.
-
-## Commit message format
-
-Use the Conventional Commits format:
-
-```text
-<type>(optional-scope): <short imperative summary>
-```
-
-Use a lowercase type, scope, and summary, no period at the end, and keep the first line at 72 characters or fewer. Write the summary as an action, for example `fix: prune translations for expired messages`. CI enforces this format and length for PR titles.
-
-Allowed types:
-
-| Type | Use it for |
-| --- | --- |
-| `feat` | User-visible functionality. |
-| `fix` | A bug fix. |
-| `docs` | Documentation only. |
-| `refactor` | Code restructuring without a behavior change. |
-| `perf` | A performance improvement. |
-| `test` | Adding or changing tests without changing production behavior. |
-| `build` | Build scripts, packaging, or dependency tooling. |
-| `ci` | Continuous integration workflow changes. |
-| `chore` | Other maintenance that does not fit a more specific type. |
-| `style` | Formatting-only changes with no behavior change. |
-| `revert` | Reverting an earlier commit. |
-
-Add a scope when it makes the change clearer, such as `fix(translator): retry failed setup`. Use `!` after the type or scope for a breaking change, and explain it in the body with a `BREAKING CHANGE:` footer. Add a body when context is needed; wrap long text and explain why the change is needed. Reference issues in the body when relevant.
-
-Examples:
+Use lowercase Conventional Commits for commit subjects and PR titles, with an optional scope and a summary of at most 72 characters including the prefix:
 
 ```text
 feat(settings): remember the incoming language
 fix: prune translations for expired messages
-docs: explain the pull request workflow
-refactor(bridge): share message validation rules
-build!: require dotnet 10 sdk
+docs: explain local model setup
 ```
 
-Avoid vague messages such as `updates`, `fix stuff`, or `misc`. Each commit should make sense on its own. Before a PR is merged, squash work-in-progress commits and use a final message that follows this format.
+Allowed types are `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `style` and `revert`. Write the summary as an action without a trailing period. For a breaking change, add `!` after the type or scope and explain it with a `BREAKING CHANGE:` footer. CI checks PR title format and length.
 
-## Issues and pull requests
+Use the [PR template](.github/PULL_REQUEST_TEMPLATE.md): describe the problem and resulting behavior in **Summary**, add relevant **Implementation notes**, and list the checks you actually ran under **Checks**. If a check doesn't apply, explain why. Keep the PR focused and review the diff before pushing; leave generated output, models, local settings, credentials and chat data out of Git.
 
-Before opening an issue, check for an existing report. Bug reports should include the osu-chatter version, Windows version, osu! stable version when relevant, steps to reproduce, and expected versus actual behavior. Feature requests should explain the problem first, then describe the proposed behavior and alternatives considered.
+Merge reviewed PRs with **Squash and merge**, using the PR title as the final commit subject, then delete the branch. Maintainers should protect `main` with required PRs and the `Build and release / build` check, disable force pushes and deletion, and require up-to-date branches where practical.
 
-PR descriptions should state the user-visible result, explain any important implementation decision, link the issue when one exists, and list the checks actually run. Keep screenshots and logs free of chat contents, private messages, API keys, usernames, and other personal data.
+## Releases
 
-## Building and checking changes
+Pushing a `v*` tag publishes a release through [Build and release](.github/workflows/release.yml). Tag the merged `main` commit when ready to publish. Tags containing a hyphen are prereleases; other version tags create stable releases.
 
-Requirements: 64-bit Windows, the .NET 10 SDK or newer, and .NET Framework 4.8. Install the .NET Framework 4.8 Developer Pack if the build reports MSB3644.
+Before tagging, update the version in [Directory.Build.props](Directory.Build.props) and replace [RELEASE-NOTES.md](RELEASE-NOTES.md) with notes for that release. Run `package.bat -NoPause -Version <tag> -ModernTranscriptCheck`, perform the [manual game checks](docs/development.md#manual-game-checks), and inspect the extracted ZIP. The workflow publishes that ZIP and the release notes in the repository where it runs.
 
-Double-click `check.bat` to build and run the offline checks and application smoke check. Use `run.bat` to build and launch, or `package.bat` to build, check, and prepare a release ZIP. The launchers use `scripts/manage.ps1`, which is also used by CI. For terminal/CI usage, pass `-NoPause`:
+Use a new version when changing distributed bridge code: its assembly identity includes the release version, so reusing a version can leave osu! running an older loaded bridge.
 
-```powershell
-.\check.bat -NoPause
-.\package.bat -NoPause -Version v1.0.0
-```
+## Documentation changes
 
-Equivalent direct commands:
+Keep the [README](README.md) focused on what Chatter does and how to start. Put detailed usage in the relevant [guide](docs/README.md), and keep the packaged [START-HERE.txt](scripts/START-HERE.txt) usable as an offline quick start.
 
-```powershell
-dotnet build chatter.slnx -c Release
-.\scripts\test-stable-monitor.ps1
-src\Chatter.Tests\bin\Release\net48\Chatter.Tests.exe
-src\Chatter.App\bin\Release\net48\chatter.exe --smoke
-```
+Check settings labels against `SettingsView.cs` and `SettingsView.Providers.cs`, defaults against `ExperienceOptions.cs`, and actions against the MainForm/overlay/reply code. Update the [compatibility reference](docs/stable-compatibility.md) when changing the integration and the release instructions above when changing packaging.
 
-The default checks use fake game data, a local HTTP fixture and offline compatibility-monitor fixtures. They do not need a real DeepL key and do not send chat messages. Live probes (`--live`, `--native-live`, `--commands-live`, `--inspect-commands-live`) and translation/model checks (`--translation-live`, `--install-model`, `--install-quality-model`, `--test-madlad`, `--test-plamo`) are separate from routine contributions: they inspect or temporarily modify a running test client, use a translation runtime, or download large models.
-
-The opt-in `--test-madlad` and `--test-plamo` checks install the corresponding Q4 model plus CPU/Vulkan engines under `artifacts/models`, then translate fixed Russian, Polish, English and Korean fixtures on both backends, including a protected URL. It requires a Vulkan GPU and about 2.5 GB free disk space. Printed request timings include startup/model reloads when needed. GPU cases also require confirmation of offloaded layers from engine diagnostics.
-
-Run `check.bat -NoPause -ModernTranscriptCheck` to also exercise the real WebView2 transcript when the runtime is installed. The [compatibility guide](docs/stable-compatibility.md) records the current signatures, offsets and reflected members, and explains manual maintenance and live verification. The separate [daily compatibility watch](docs/stable-compatibility.md#stable-compatibility-workflow) is an early update alert, not a required merge check or a live game test.
-
-For repaint changes, run `src\Chatter.Tests\bin\Release\net48\Chatter.Tests.exe --settings-paint-test artifacts\settings-paint` on an unlocked Windows desktop. This opt-in check briefly shows a fixture window and compares retained screen pixels after scrolling and section changes against a complete repaint, saving images on failure. Ordinary `DrawToBitmap` screenshots force painting and can hide stale-pixel defects. The fixture uses synthetic model listings and does not send messages or change saved preferences.
-
-Keep pull requests focused. Explain user-visible changes and mention which checks you ran.
-
-## Keeping documentation current
-
-When changing user-visible behavior, update [README.md](README.md) and the packaged [START-HERE.txt](scripts/START-HERE.txt). Keep setting names, shortcuts, provider behavior, sending limits and privacy descriptions aligned with the implementation. Use `SettingsView.cs` and `SettingsView.Providers.cs` for settings labels, `ExperienceOptions.cs` for defaults/ranges, and the MainForm/overlay/reply code for actions and shortcuts. First-run provider labels can differ from the main Settings labels.
-
-The README describes feature usage, models, storage and troubleshooting. [stable-compatibility.md](docs/stable-compatibility.md) documents client layouts, integration diagnostics and the upstream watch. [release-candidate.md](docs/release-candidate.md) records observed validation and outstanding acceptance checks; preserve the distinction between offline fixtures, live no-send probes and actual sending. [releasing.md](docs/releasing.md) covers packaging and publishing. Update the relevant guide when changing those paths, and verify relative links after moving or deleting files.
-
-Documentation-only checks should validate the changed descriptions against source and check links. Do not report a build, live integration test or owner acceptance unless it was actually performed for the stated revision. The release ZIP contains README, START-HERE and RELEASE-NOTES; the full contributor/compatibility guides, historical candidate validation and source links are available in the repository.
-
-Maintainers preparing a tag should follow [Preparing a release](docs/releasing.md); a `v*` tag triggers publication after the build passes.
+Keep documentation about the current implementation and release. Change history belongs in commits and past GitHub releases. For documentation-only changes, verify descriptions against source and check links and anchors.

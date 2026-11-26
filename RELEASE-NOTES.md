@@ -1,28 +1,27 @@
 # osu-chatter 1.0.0
 
-osu-chatter is a Windows chat companion for osu!stable. Read open conversations, translate incoming messages and preview or send replies from the app, the optional game overlay or enabled in-game translation commands.
+Read and translate osu!stable conversations in Chatter, over the game, or directly in osu!'s chat.
 
 ## Chat and translation
 
-- Embedded settings with separate automatic/manual translation providers and remembered conversation languages.
-- Lightweight local Argos translation, local Hy-MT2 Fast/Quality models, OpenAI-compatible chat-completions endpoints, DeepL API and LibreTranslate. Original-text chat mode is also available.
-- Bounded preceding context and terminology guidance for AI providers, protected links/map titles, history policies, visible-message priority, per-message errors and manual retry.
-- A selectable WebView2 transcript with color emoji, RTL text, search, player profiles and links, plus a built-in fallback renderer.
-- Keyboard shortcuts, window placement, text size, topmost mode, optional private-message notifications and minimize-to-tray.
+- Translate incoming messages and preview translated replies before sending.
+- Use local Argos translation, Hy-MT2 Fast/Quality, MADLAD-400, PLaMo Translate, DeepL API, LibreTranslate or an OpenAI-compatible server.
+- Choose separate providers for automatic translation and the Translate button, with language choices remembered per conversation.
+- Give supported AI providers preceding messages and terms to preserve. Retry individual translations or choose another target language.
+- Select and search chat text, follow links and open player profiles. The modern view supports color emoji and RTL text, with a built-in renderer available without WebView2.
+- Adjust text size, keep the window on top, receive private-message notifications and minimize to the tray.
 
-## Game integration
+## In-game chat
 
-- A movable/resizable overlay with scrolling, mouse pass-through and a reply panel. External overlays require windowed/borderless mode.
-- Incoming translations in osu!'s own chat, including exclusive fullscreen, with translation-only, bilingual and original presentation. Display leases restore originals when integration stops.
-- Optional `/t <language> <message>` and `/translate` commands using the existing guarded sender. Sends are explicit and are never automatically retried.
-- Shared client layout validation, release-specific bridge identities, version/fingerprint diagnostics and a separate upstream-version compatibility watch.
+- Move, resize and scroll an overlay, lock it for mouse pass-through, and reply from its reply panel.
+- Show translations in osu!'s own chat, including exclusive fullscreen. Choose translation only, translation with the original, or original text.
+- Translate replies from osu!'s chat box with `/t <language> <message>` or `/translate`.
+- Inspect client compatibility in Settings → About to help diagnose integration errors after game updates.
 
-## Installation and limits
+## Installation
 
-Extract the complete Windows ZIP and run `chatter.exe`, keeping `chatter.exe.config` beside it. Requires Windows 10/11 x64 and .NET Framework 4.8. Visual Studio, the SDK and system Python are not needed for a release. The modern transcript uses Microsoft Edge WebView2; the built-in transcript works without it.
+Extract the complete ZIP and run `chatter.exe`, keeping `chatter.exe.config` beside it. Requires Windows 10/11 x64, .NET Framework 4.8 and osu!stable. osu!lazer isn't supported.
 
-This integration targets osu!stable x86, not lazer. Native operations and sending require menus/lobby and depend on the private client layout. Successful version detection is not a guarantee that every osu! build is supported. Models download separately, require free disk space and can mistranslate informal chat. Hosted providers require your configuration and may charge for usage.
+Sending and native chat translation work in menus or the lobby. The overlay needs windowed/borderless mode. Local models download separately; hosted providers receive submitted text and may charge for usage. Chatter keeps chat text in memory rather than saving a chat archive.
 
-Chatter does not save chat text to disk. Cloud translation sends text to the chosen provider; chat-completions providers can also receive the selected context/glossary. Settings and downloaded runtimes/models persist locally, and API keys use Windows DPAPI.
-
-See [README.md](README.md) for usage and troubleshooting, [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) for dependency notices and [LICENSE](LICENSE) for the PolyForm Noncommercial terms.
+See [Getting started](README.md#getting-started), [translation setup](docs/translation.md) and [troubleshooting](docs/troubleshooting.md). Dependency notices are in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt); license terms are in [LICENSE](LICENSE).

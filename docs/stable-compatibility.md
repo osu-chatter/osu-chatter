@@ -1,32 +1,20 @@
 # osu!stable compatibility and maintenance
 
-Current implementation: a shared layout profile, fresh account reads, x86 checks, signature-ambiguity rejection, reflected member contracts, typed reader errors, native chat rendering and outgoing command hooks. There is one locally tested executable fingerprint; there is no runtime build allowlist or certification of every/latest Stable build.
+This is the maintainer reference for the memory reader, in-process bridge and native chat integration. For app controls, see [Chat and in-game controls](usage.md); for diagnosing a failure, start with [Troubleshooting](troubleshooting.md).
 
-For feature usage, see [README.md](../README.md). Candidate validation and remaining owner checks are in [release-candidate.md](release-candidate.md).
+Chatter targets the x86 osu!stable client. It validates signatures, object layouts and reflected members at runtime. The recorded test baseline identifies one executable, not a list of supported builds.
 
-## Memory addresses, offsets and changes in this candidate
+## Address discovery
 
 The app does not depend on a saved list of absolute process addresses. It finds the chat root and account/state storage using byte signatures, then follows pointers and relative field offsets. Actual addresses belong to the running process and can differ between launches; this alone does not require changing the integration. Signatures, object layouts and reflected member names are separate assumptions that may change with a game build.
 
-Comparison with the repository's pre-candidate `HEAD` on 2026-11-22 confirmed:
+Game-specific signatures, offsets and obfuscated names are centralized in `StableCompatibilityProfile.cs`; x86 CLR layout constants are in `Clr32Layout.cs`. Runtime checks are local to the running client; the separate [compatibility watch](#stable-compatibility-workflow) checks upstream version metadata.
 
-| Integration part | Candidate changes |
-| --- | --- |
-| Existing chat/account byte signatures and operand offsets | Unchanged |
-| Existing chat/account object field offsets | Unchanged |
-| x86 CLR string/list/array layout | Unchanged |
-| Reflected sender/scheduler/account type and member names | 14 names refreshed from the inspected executable |
-| Native incoming translation and outgoing command input | Additional renderer/scroll/input members were identified for the new features |
-| Game build diagnostics | Added a configuration-dictionary signature/layout for LastVersion; existing chat/account discovery is unchanged |
-| Runtime validation | Added x86, signature-ambiguity and member-contract checks; these are safeguards, not replacement memory offsets |
-
-The inspected file still has SHA-256 `512B7F90B4D8A43E7895A029B36B4D18B34B35C0F66B4C463F8C2A9DA37F37E6`. A read-only binary check found all 14 current reflected names and none of their old equivalents. Thus the external chat reader's offsets did not need adjustment, while the in-process sender integration did need refreshed names relative to the earlier source. This comparison does not establish when the names changed or imply that every game update changes them.
-
-The tables below describe the current implementation. All game-specific signatures, offsets and obfuscated names are centralized in `StableCompatibilityProfile.cs`; x86 CLR layout constants are in `Clr32Layout.cs`. A separate scheduled workflow watches upstream version metadata as an early warning. Chatter itself makes no release-feed requests for compatibility; runtime validation remains local, and any integration changes require manual verification.
+The inventories below describe the source assumptions used by the integration. Update them alongside the shared profile when a client layout changes.
 
 ## Updating the integration
 
-The game-specific values have one edit location: [`src/Shared/StableCompatibilityProfile.cs`](../src/Shared/StableCompatibilityProfile.cs), source-linked into both Core and Bridge. `Chat` contains the root signature and chat field offsets; `Account` contains account/state signatures, operand offsets, profile fields and login values; `Members` contains in-process type/member names and invocation flags. The allowed menu/lobby states live in the same profile. There is one current profile, with no historical offset collection or runtime build allowlist. `NativeChat` also contains renderer/cache and scrolling member names.
+The game-specific values have one edit location: [`src/Shared/StableCompatibilityProfile.cs`](../src/Shared/StableCompatibilityProfile.cs), source-linked into both Core and Bridge. `Chat` contains the root signature and chat field offsets; `Account` contains account/state signatures, operand offsets, profile fields and login values; `Members` contains in-process type/member names and invocation flags. The allowed menu/lobby states live in the same profile. There is one current profile and no runtime build allowlist. `NativeChat` also contains renderer/cache and scrolling member names.
 
 [`Clr32Layout.cs`](../src/Chatter.Core/Clr32Layout.cs) separately names x86 CLR string/list/array and primitive layout assumptions. Keep these separate from osu! field changes. `OsuChat` handles process/discovery/retries, `StableAccountReader` decodes fresh identity/state observations, `ChatGraph` decodes chat, and `StableGame` resolves and invokes game members. UI and translation code do not consume offsets. Existing public `ChatRules` login/state helpers forward to the profile for source compatibility.
 
@@ -48,21 +36,17 @@ The monitor validates [stable-profile.json](stable-profile.json) against the sou
 | `fetch-failed` / `feed-invalid` | Update metadata could not be verified. Compatibility is unknown, not automatically broken or working. |
 | `manifest-invalid` / `profile-mismatch` | Recorded metadata is invalid or disagrees with the source profile. |
 
-The workflow is an early maintenance signal, not a runtime requirement, compatibility certification or automatic repair. Removing it does not cause a game failure; an upstream change can invalidate names/layouts whether or not it is monitored. Reading may keep working while sending fails, as shown by the older desktop app's reported `startup 11` bridge error and its still-working reader. The recorded executable has the current reflected identifiers, while the older bridge contains their previous equivalents. This is why reader-only testing does not verify the complete integration.
+The watch detects upstream version changes. Reading, sending, native display and commands still need separate game checks. It is independent of runtime validation and the required build check.
 
-The job has read-only repository permissions and writes a GitHub Actions summary. It never launches/downloads the game, sends chat, changes offsets or the baseline, creates issues, or publishes releases. Keep it separate from the required build check, because its result depends on the external feed and manual compatibility evidence.
-
-Baseline established on 2026-11-22: the inspected executable is Stable `20261118.1`. Its SHA-256 is unchanged, local `LastVersion` is `b20261118.1`, `_ReleaseStream` is `Stable40`, and its MD5 `f9ad3034924a5ff73a0c1a8d662741fd` matches the `osu!.exe` record in the [official stable40 updater manifest](https://osu.ppy.sh/web/check-updates.php?action=check&stream=stable40). That record's `file_version` is `4166`; this is an updater file identifier, not the game's displayed build or PE file version. The public changelog independently reports `20261118.1`, and the live monitor passes against that baseline. This identifies the release without certifying every functional path.
-
-The earlier `/api/v2/changelog?stream=stable40` request returned HTTP 403 here. The public `/home/changelog?stream=stable40` route returns JSON with the Accept header, HTTP 200, and the expected stable40 build. Its controller serves JSON for this request ([upstream implementation](https://github.com/ppy/osu-web/blob/master/app/Http/Controllers/ChangelogController.php)). Fetch/format failures still remain unknown results, and a future upstream version change still requires manual integration verification.
+The job has read-only repository permissions and writes a GitHub Actions summary. It never launches/downloads the game, sends chat, changes offsets or the baseline, or publishes releases. Keep it separate from the required build check, because its result depends on the external feed and manual compatibility evidence.
 
 Run `./scripts/check-stable.ps1` for the live metadata check or `./scripts/test-stable-monitor.ps1` for its offline fixtures. `-ChangelogPath <saved-response.json>` supports offline diagnosis and explicitly identifies fixture input. After validating an actual client build, update the official identifier and fingerprint/evidence together; do not weaken integration checks to accommodate an unknown layout.
 
 ## Reading the installed game version
 
-`StableVersionReader` follows the approach in the owner's osu! Reborn memory reader: read the exact `LastVersion` key from the live configuration dictionary, then fall back to `osu!*.cfg` next to the running executable. The diagnostic reports a build such as `b 20261118.1`, its source and the configured release stream separately from PE `FileVersion` (`1.3.3.8`). Configuration-only results describe the last launched version and can be stale; conflicting per-user files remain unknown instead of picking one arbitrarily. `LastVersionPermissionsFailed` is never used as the current build.
+`StableVersionReader` reads the exact `LastVersion` key from the live configuration dictionary, then falls back to `osu!*.cfg` next to the running executable. The diagnostic reports a build such as `b 20261118.1`, its source and the configured release stream separately from PE `FileVersion` (`1.3.3.8`). Configuration-only results describe the last launched version and can be stale; conflicting per-user files remain unknown instead of picking one arbitrarily. `LastVersionPermissionsFailed` is never used as the current build.
 
-All new memory assumptions are in `StableCompatibilityProfile.ClientVersion`:
+The version-reader memory assumptions are in `StableCompatibilityProfile.ClientVersion`:
 
 | Item | Current assumption |
 | --- | --- |
@@ -75,7 +59,7 @@ All new memory assumptions are in `StableCompatibilityProfile.ClientVersion`:
 | Version key / format | Exact `LastVersion`; normalize `b20261118.1`, `b 20261118.1` or `20261118.1`, validating the calendar date |
 | Mutation checks | Re-read operand, dictionary, array, count and selected entry/value pointers before accepting the build |
 
-Only the explicit Settings → About compatibility inspection performs the extra signature scan. It runs in the background and does not slow down opening settings or the normal chat polling path. Version metadata is diagnostic and never grants permission to send. Failure falls back to configuration files without weakening the existing account/chat checks. The new memory structure is covered by independent fixtures; the configuration path was exercised against the actual installed game. No running game was available for a new live configuration-memory probe during this change.
+Only the explicit Settings → About compatibility inspection performs the extra signature scan. It runs in the background, outside settings startup and normal chat polling. Version metadata is diagnostic and never grants permission to send. Failure falls back to configuration files without weakening account/chat checks. Independent fixtures cover the memory structure.
 
 ## Current paths
 
@@ -224,22 +208,18 @@ The native member inventory is `StableCompatibilityProfile.NativeChat`. These ar
 
 `NativeDisplayLease` schedules refreshes every 250 ms with at most one outstanding callback. Each accepted batch renews a three-second lease. Missing refreshes, disconnect/account/state rejection, explicit disable/pause, bridge stop, or host loss restore originals on the scheduler. A stopped scheduler delays restoration until it runs again. Each refresh revalidates identity, connection, menu/lobby state, target existence and the game-selected room, matches IDs against original messages, and skips own/system messages. Tab changes invalidate surviving translated caches in the previous room. The implementation does not hook network receive methods, rewrite original chat strings, alter the selected tab or send messages.
 
-### Local validation on 2026-11-21
-
-Profile identifier: `stable-local-2026-11-21`. Observed executable file/product version: `1.3.3.8`. SHA-256: `512B7F90B4D8A43E7895A029B36B4D18B34B35C0F66B4C463F8C2A9DA37F37E6`. This fingerprint identifies the inspected local executable; it is not an official osu! release/build identifier or a runtime compatibility gate. Reflection names in `Members` were refreshed from that file; memory-reading offsets and signatures were unchanged.
-
-The isolated Release build and offline suite passed. The explicit `Chatter.Tests.exe --native-live` probe exercised the bridge against the running client, changed 22 existing rendered incoming lines, confirmed the reader still returned original text/link sources, renewed the display lease, and finally restored the display. Visual inspection confirmed test text inside the native chat, stable sender/timestamp placement, and restoration of original text and link styling. The probe uses local fixture replacement text; it does not send chat messages or invoke a translation provider. Full provider-to-game testing, Arabic/Hebrew target shaping, long wrapped translations, tab/account changes and gameplay transitions remain manual checks before broader compatibility claims.
+### Verifying native display
 
 Manual checks for future builds: enable native mode with a cached/local provider; verify a new Russian or Arabic incoming line becomes the chosen target language; switch game tabs independently of Chatter; scroll history while translations finish; check long wrapped lines, duplicate messages, actions, links, own/system exclusions; then disable, pause, disconnect, change account, enter gameplay, close/kill Chatter and restart osu!. Verify originals return and app/overlay IDs/unread state remain stable. Actual sending is a separate manual check and must only use a deliberately chosen target and message.
 
 
-## Combined candidate changes (2026-11-21)
+## Runtime validation
 
-The shared profile now has an identifier and locally tested SHA-256. Settings → About copies version/hash/profile and distinguishes a matching fingerprint from an unverified executable. The reader checks x86 architecture before attaching, scans all signature hits, and rejects hits resolving to distinct storage operands. Repeated JIT sites resolving to the same operand are accepted. Chat roots are structurally verified, with a single valid root required. Account observations never reuse stale identity. Reflection validates scheduler return/callback types, string/bool/list contracts and required members. CompatibilityException carries typed reader errors; bridge startup distinguishes missing/type members (12), invalid operations (13), and unexpected failures (11).
+The shared profile has an identifier and a recorded executable SHA-256. Settings → About copies version/hash/profile and distinguishes a matching fingerprint from an unverified executable. The reader checks x86 architecture before attaching, scans all signature hits, and rejects hits resolving to distinct storage operands. Repeated JIT sites resolving to the same operand are accepted. Chat roots are structurally verified, with a single valid root required. Account observations never reuse stale identity. Reflection validates scheduler return/callback types, string/bool/list contracts and required members. CompatibilityException carries typed reader errors; bridge startup distinguishes missing/type members (12), invalid operations (13), and unexpected failures (11).
 
 Runtime diagnostics compare the executable fingerprint and read the installed build for information only; there is no in-app release-feed lookup or official-build allowlist. Runtime architecture, signature, graph, reflected-member and account checks remain local to the actual integration.
 
-### Native outgoing command hook
+## Native outgoing command hook
 
 `StableCompatibilityProfile.NativeCommands` additionally names the native input type and field used for guarded draft restoration:
 
@@ -258,11 +238,13 @@ An enabled hook has a three-second heartbeat lease. The app polls once a second 
 
 Offline checks patch an isolated no-inline fixture sender, never the game's live sender, to verify capture, ordinary-command pass-through, malformed alias consumption, draft restoration and unpatch. The separate --commands-live probe installs/removes the real hook without calling the sender. Actual translated sending remains an owner acceptance step with an explicitly chosen target and message.
 
-### Display and transcript behavior
+## Display and transcript behavior
 
 Native batches optionally append the original in brackets; original-only disables the display lease. Message bodies/IDs remain original. Automatic work covers configurable recent/new/history policies and prioritizes visible rows. Normal provider progress stays in a fixed status area instead of resizing the transcript. The modern transcript patches keyed rows and restores its reading anchor; it uses textContent and validated link ranges. Its private WebView2 document admits only its exact generated data URI/about:blank, blocks external navigation, and denies browser permissions. The fallback renderer remains available. No translation/chat content is logged to disk; setup-only diagnostics contain no chat input.
 
 
-### RC3 loader validation
+## Bridge loading
 
-Read-only inspection of the running game found the old `Chatter.Bridge, Version=1.0.0.0` and no Harmony/command owner while RC2 was running. The exact CLR host path is covered by an isolated emitter/stub regression: loading version 2 under the old simple name still executes version 1; a distinct simple name executes the new marker. Release-version identity prevents this collision without restarting the game. Harmony owner IDs are also unique per command-handler instance, preventing late session cleanup from removing a newer prefix. The current live `--commands-live` no-send probe installed/removed the real hook successfully; it never invokes the sender. `--inspect-commands-live <report>` records hook metadata, assembly identities and state only, with no chat content.
+The CLR can reuse an already loaded weak-named assembly after a version-only update. The bridge therefore includes the release version in its simple assembly name. An isolated emitter/stub regression covers the same CLR host path: a changed assembly version under the old name still executes the old code, while a distinct name executes the new code.
+
+Harmony owner IDs are unique per command-handler instance, so delayed cleanup can't remove a newer session's prefix. `--commands-live` installs/removes the hook without sending; `--inspect-commands-live <report>` records metadata and state without chat text.

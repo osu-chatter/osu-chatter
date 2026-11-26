@@ -1,72 +1,74 @@
-osu-chatter 1.0.0
+osu-chatter
 
-Close any older Chatter instance. Extract the complete ZIP and run chatter.exe.
-Keep chatter.exe.config beside it.
+GETTING STARTED
 
-Open 32-bit osu!stable, sign in and open your conversations in the game.
-osu!lazer is not supported. Select one of those conversations in Chatter.
-On first launch, choose a provider and languages. Settings has Translation,
-In-game chat, Overlay, Application, Models and About inside the main window.
-Save changes (Ctrl+S) applies settings; Back to chat/Esc discards unsaved edits.
-Settings sections keep their scroll positions when switching between sections.
-Chat keeps your reading position during updates, resizing and visiting Settings;
-Jump to latest resumes following new messages.
+1. Close any older Chatter instance. Extract the whole ZIP and run chatter.exe.
+   Keep chatter.exe.config beside it.
+2. Start osu!stable, sign in and open your channels or private conversations
+   in the game. Chatter shows conversations already open there.
+3. Choose a translation provider and languages in Chatter. You can also choose
+   Chat without translation during setup.
+4. Select a conversation. Enable automatic translation to read it in your
+   chosen language. Check the source and target languages below the reply box.
+5. Preview translates your draft without sending. Send or Enter submits it.
+   The translated reply must fit 400 characters. Sending isn't retried
+   automatically; check the game before submitting a message again.
 
-For free local AI: Models -> choose folder, Fast/Quality/MADLAD/PLaMo and CPU/Vulkan -> install;
-then Translation -> Local AI -> save. Models are separate large downloads.
-Fast needs about 1.5 GB free; Quality 6.5 GB; MADLAD/PLaMo 2.5 GB.
-Vulkan enables GPU offload on compatible AMD/Intel/NVIDIA GPUs. Reduce GPU
-layers if memory is insufficient. Save the installed paths to apply changes.
-MADLAD reloads per message and does not use context/glossary guidance.
-Choose model storage folder changes future AI downloads to any drive.
-Use existing/custom GGUF model selects your own supported model; Prepare
-engine installs only its runtime. Save to apply the selected model and paths.
-The status line reports CPU or verified GPU offload. Argos always uses CPU.
-PLaMo uses the PLaMo Community License; Ukrainian/Turkish pairs are unsupported.
-Lightweight Argos downloads its own runtime and language pairs as needed.
-Cached models work offline. DeepL API, LibreTranslate and OpenAI-compatible
-chat-completions servers are also supported; hosted providers receive text
-and may charge. Automatic and manual translation can use separate providers.
-No translation mode reads/sends originals. Send original text skips outgoing
-translation in Chatter/reply without turning off incoming translation.
-
-Preview never sends. Enter/Send translates and sends once, in menus/lobby.
-The translated message must fit 400 characters. No automatic send retries.
-Join new channels or open private conversations in the game.
-Pause stops reading and native integration; Resume starts reading again.
-
-Overlay: enable in Settings -> Overlay, then focus osu! in windowed/borderless
-mode outside gameplay. Ctrl+Shift+O locks/unlocks; Ctrl+Shift+Enter opens reply
-when available. Drag/resize/scroll while unlocked. Shortcuts are configurable.
-
-In-game incoming translation: enable in In-game chat, choose presentation,
-then enable automatic translation and an incoming language for that
-conversation under Translation. This mode also works in exclusive fullscreen.
-It only changes local display, never broadcasts incoming translations.
-
-Native outgoing commands: enable in In-game chat, wait for /t ready, then type
-/t en your message in osu! (/translate is an alias). Codes:
-en pl ru ko ja zh de fr es pt uk he ar tr
-Commands require connection and menus/lobby and expire after 45 seconds.
-Send original text does not bypass translation of these commands.
-
-Ctrl+Tab / Ctrl+Shift+Tab switches conversations; Ctrl+, opens Settings;
-Ctrl+F searches; Up in an empty composer recalls the last submitted draft.
-Application settings include text size, topmost, startup reading and private
-message notifications. If minimize-to-tray is on, closing keeps Chatter running;
-use Quit in the tray menu to exit.
-
-Requires 64-bit Windows 10/11 and .NET Framework 4.8. Modern transcript uses
-Microsoft Edge WebView2; built-in text rendering is available without it.
-No Visual Studio, SDK or system Python is required for the release.
+You need 64-bit Windows 10/11, .NET Framework 4.8 and osu!stable.
+osu!lazer isn't supported. No Visual Studio, SDK or system Python is needed.
 Use the same Windows privilege level for Chatter and osu!stable.
 
-Settings: %LOCALAPPDATA%/osu-chatter/settings.json (keys use Windows DPAPI).
-Downloaded runtimes/models persist; chat text is not saved to disk by Chatter.
-About -> Inspect current osu! compatibility copies diagnostics without chat.
-About -> Check for app updates opens the releases page.
+TRANSLATION
 
-Read README.md for full feature usage and troubleshooting, and
-RELEASE-NOTES.md for the changes in version 1.0.0.
-Repository guides referenced by those files are available online:
+For local AI, open Settings -> Models, choose a folder, preset and CPU/Vulkan
+engine, then install. Select Local AI in Settings -> Translation and save.
+Allow at least 1.5 GB free for Fast, 6.5 GB for Quality, or 2.5 GB for
+MADLAD/PLaMo. Larger models need more memory and can be slow on CPU.
+Try Preview first to check the installed model. Reduce GPU layers if Vulkan
+runs out of memory. MADLAD reloads per message without context or glossary;
+PLaMo doesn't support explicit Ukrainian/Turkish pairs.
+
+Local lightweight (Argos) downloads its own runtime and language pairs.
+Installed models work offline. DeepL API, LibreTranslate and Chat API are
+also available; hosted providers receive submitted text and may charge.
+Automatic translation and the Translate button can use separate providers.
+
+IN-GAME CHAT
+
+Sending and in-game translation work in menus or the lobby.
+
+Overlay: enable in Settings -> Overlay and use windowed/borderless osu!.
+Ctrl+Shift+O locks/unlocks it. Ctrl+Shift+Enter opens reply when available.
+Drag, resize and scroll while unlocked. Shortcuts can be changed in settings.
+
+Translations in osu!'s own chat: enable Translate incoming messages in osu!
+under Settings -> In-game chat. Also enable automatic translation and choose
+an incoming language for that conversation. This works in fullscreen too;
+incoming translations only change your local display.
+
+Commands: enable /t and /translate in In-game chat and wait for /t ready.
+Type /t ru Hello everyone! in osu! to translate English into Russian. Codes:
+en pl ru ko ja zh de fr es pt uk he ar tr
+Commands expire after 45 seconds, so load a large model with Preview first.
+Send original text doesn't bypass translation for /t.
+
+SETTINGS AND HELP
+
+Ctrl+, opens Settings; Ctrl+S saves. Back to chat/Esc discards unsaved edits.
+Ctrl+Tab switches conversations; Ctrl+F searches the current conversation.
+Pause stops reading and in-game integration; Resume starts reading again.
+If minimize-to-tray is on, use Quit in the tray menu to exit fully.
+
+If reading fails, check that osu!stable is running and the conversation is open.
+If sending fails, check connection, menus/lobby and the 400-character limit.
+After an osu! update, About -> Inspect current osu! compatibility copies a
+report without chat text. Integration can need an update even if reading works.
+The modern chat view needs WebView2; a built-in renderer is also available.
+
+Chatter doesn't save chat text to disk. Settings are stored in
+%LOCALAPPDATA%/osu-chatter/settings.json; API keys use Windows DPAPI.
+Downloaded engines and models remain on disk after you exit.
+
+Read README.md for an introduction and links to the full guides.
+RELEASE-NOTES.md describes this version. Documentation is also available at:
 https://github.com/osu-chatter/osu-chatter/tree/main/docs

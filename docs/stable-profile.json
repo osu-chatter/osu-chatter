@@ -5,8 +5,5 @@
   "file_version": "1.3.3.8",
   "sha256": "512B7F90B4D8A43E7895A029B36B4D18B34B35C0F66B4C463F8C2A9DA37F37E6",
   "architecture": "x86",
-  "verified_paths": ["reader", "native-display", "display-restoration", "native-command-hook-no-send"],
-  "updater_file_version": "4166",
-  "updater_md5": "f9ad3034924a5ff73a0c1a8d662741fd",
-  "note": "Established on 2026-11-22: local LastVersion b20261118.1 and Stable40 configuration agree with the public changelog; the inspected executable SHA-256 is unchanged and its MD5 matches the official stable40 updater manifest. This identifies the build, not full functional certification."
+  "verified_paths": ["reader", "native-display", "display-restoration", "native-command-hook-no-send"]
 }

@@ -53,16 +53,16 @@ Enable the **game overlay** in **Settings → Overlay**. It follows the conversa
 
 For translations in **osu!'s own chat**, enable **Translate incoming messages in osu!** under **Settings → In-game chat**. Automatic translation must also be on for that conversation. This works in exclusive fullscreen too.
 
-You can enable **/t and /translate commands** in the same section. Wait for `/t ready` in Chatter, then type a command in osu!'s chat box. For example, translate an English greeting into Russian:
+You can enable **/t and /translate commands** in the same section. Wait for `/t ready` in Chatter, then type a command in osu!'s chat box. These examples translate English into Russian:
 
 ```text
 /t ru Hi everyone! How are you doing?
 ```
 
-Or ask about a multiplayer game:
+The longer `/translate` alias works the same way:
 
 ```text
-/t ru Does anyone want to play multiplayer?
+/translate ru Thanks for the game! See you next time.
 ```
 
 The source language is detected automatically; `ru` selects Russian as the target. See [more command examples](docs/usage.md#translating-replies-with-t).
@@ -88,3 +88,5 @@ If you get `MSB3644`, install the .NET Framework 4.8 Developer Pack. See [Contri
 [PolyForm Noncommercial 1.0.0](LICENSE). Noncommercial use, modification and redistribution are permitted; commercial use is not permitted under this license.
 
 **osu-chatter** is an **unofficial** community project and is not affiliated with osu! or its developers.
+
+AI tools were used to assist with the development of osu-chatter.

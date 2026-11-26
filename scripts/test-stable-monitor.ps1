@@ -66,6 +66,7 @@ try {
     $checks++
     Write-Output 'ok  monitor: Windows PowerShell entry point resolves the default manifest'
     Write-Output "$checks offline monitor checks passed; no live game or network request was used."
+    & (Join-Path $PSScriptRoot 'test-stable-issue.ps1')
 } finally {
     Remove-Item -LiteralPath $manifestFixture, $feedFixture -Force
 }

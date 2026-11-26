@@ -79,4 +79,6 @@ For packaging and publication, see [Releases](../CONTRIBUTING.md#releases).
 .\scripts\check-stable.ps1
 ```
 
-The first command uses offline fixtures. The second checks live upstream version metadata. The [daily compatibility watch](stable-compatibility.md#stable-compatibility-workflow) is separate from required build checks; matching version metadata doesn't test reading, sending or display integration.
+The first command uses offline fixtures, including GitHub API mocks for automatic update issues. The second checks live upstream version metadata and doesn't create an issue locally. The [daily update watch](stable-compatibility.md#stable-compatibility-workflow) opens one review issue per changed upstream version. It is separate from required build checks; matching version metadata doesn't test reading, sending or display integration.
+
+Run `scripts/test-stable-issue.ps1` directly to check report generation, issue formatting, open/closed issue deduplication, pagination and API failures. These tests never contact GitHub. Use the reporter's [dry-run mode](stable-compatibility.md#automatic-review-issues) to inspect the generated Markdown without posting it.

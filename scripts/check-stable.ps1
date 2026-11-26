@@ -2,9 +2,11 @@
 param(
     [string]$Manifest = '',
     # Saved API response for offline checks; omitted in the scheduled job.
-    [string]$ChangelogPath = ''
+    [string]$ChangelogPath = '',
+    [string]$ReportPath = ''
 )
 $ErrorActionPreference = 'Stop'
+if ($ReportPath -and (Test-Path -LiteralPath $ReportPath)) { Remove-Item -LiteralPath $ReportPath -Force }
 if (-not $Manifest) { $Manifest = Join-Path $PSScriptRoot '../docs/stable-profile.json' }
 $profile = Get-Content -LiteralPath $Manifest -Raw | ConvertFrom-Json
 if ($profile.stream -cne 'stable40' -or $profile.architecture -cne 'x86' -or "$($profile.sha256)" -notmatch '^[A-Fa-f0-9]{64}$') {
@@ -32,6 +34,23 @@ if (-not ($latest.version -is [string]) -or [string]::IsNullOrWhiteSpace($latest
 }
 Write-Output ('Latest osu!stable build: ' + $latest.version)
 Write-Output ('Recorded compatibility profile: ' + $profile.profile)
+if ($ReportPath) {
+    $status = if ([string]::IsNullOrWhiteSpace($profile.osu_build)) { 'baseline-unverified' }
+        elseif ($profile.osu_build -cne $latest.version) { 'review-required' }
+        else { 'matching' }
+    [ordered]@{
+        schema_version = 1
+        status = $status
+        fixture = [bool]$ChangelogPath
+        checked_at = [DateTime]::UtcNow.ToString('o')
+        baseline = $profile
+        latest = [ordered]@{
+            version = $latest.version
+            stream = $latest.update_stream.name
+            created_at = $latest.created_at
+        }
+    } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $ReportPath -Encoding UTF8
+}
 if ([string]::IsNullOrWhiteSpace($profile.osu_build)) {
     throw '[baseline-unverified] Only an executable fingerprint is recorded. Verify its official stable40 build before recording osu_build; do not copy the latest version just to pass this check.'
 }

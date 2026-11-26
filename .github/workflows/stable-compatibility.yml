@@ -1,12 +1,18 @@
-name: osu!stable compatibility watch
+name: osu!stable update watch
 on:
   schedule:
     - cron: '0 8 * * *'
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: osu-stable-update-watch
+  cancel-in-progress: false
 jobs:
   check-stable:
+    permissions:
+      contents: read
+      issues: write
     runs-on: windows-latest
     timeout-minutes: 5
     steps:
@@ -15,13 +21,23 @@ jobs:
         shell: pwsh
         run: ./scripts/test-stable-monitor.ps1
       - name: Compare official Stable changelog with recorded compatibility
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
+          $reportPath = Join-Path $env:RUNNER_TEMP 'osu-stable-update.json'
           try {
-            ./scripts/check-stable.ps1
+            ./scripts/check-stable.ps1 -ReportPath $reportPath
             'Upstream version matches the recorded baseline. This is not a live game compatibility test.' | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
           } catch {
-            'Compatibility watch needs attention. A changed version calls for manual verification; an unavailable feed or missing baseline means compatibility is unknown.' | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
-            $_.Exception.Message | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
-            throw
+            $checkFailure = $_
+            'Update watch needs attention. A changed version calls for manual verification; an unavailable feed or missing baseline means compatibility is unknown.' | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+            $checkFailure.Exception.Message | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+            if (Test-Path -LiteralPath $reportPath) {
+              $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
+              if ($report.status -eq 'review-required') {
+                ./scripts/report-stable-update.ps1 -ReportPath $reportPath | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+              }
+            }
+            throw $checkFailure
           }

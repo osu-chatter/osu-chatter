@@ -24,7 +24,7 @@ Failed account reads produce a fresh unavailable identity, and an unreadable log
 
 ## Stable compatibility workflow
 
-[osu!stable compatibility watch](../.github/workflows/stable-compatibility.yml) runs daily at 08:00 UTC and can be started manually in GitHub Actions. Scheduled runs require the workflow on the default branch, so a local file alone does not activate monitoring. See [GitHub scheduling](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+[osu!stable update watch](../.github/workflows/stable-compatibility.yml) runs daily at 08:00 UTC and can be started manually in GitHub Actions. Scheduled runs require the workflow on the default branch, so a local file alone does not activate monitoring. See [GitHub scheduling](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
 
 The monitor validates [stable-profile.json](stable-profile.json) against the source profile identifier/hash, fetches the [public changelog listing](https://osu.ppy.sh/home/changelog?stream=stable40) with `Accept: application/json`, and compares its latest build with the manually established `osu_build`. It first runs offline fixtures; ordinary `check.bat` also runs those fixtures without contacting the release feed.
 
@@ -38,7 +38,17 @@ The monitor validates [stable-profile.json](stable-profile.json) against the sou
 
 The watch detects upstream version changes. Reading, sending, native display and commands still need separate game checks. It is independent of runtime validation and the required build check.
 
-The job has read-only repository permissions and writes a GitHub Actions summary. It never launches/downloads the game, sends chat, changes offsets or the baseline, or publishes releases. Keep it separate from the required build check, because its result depends on the external feed and manual compatibility evidence.
+The job reads repository contents and has `issues: write` to open review issues. It never launches/downloads the game, sends chat, changes offsets or the baseline, or publishes releases. Keep it separate from the required build check, because its result depends on the external feed and manual compatibility evidence.
+
+### Automatic review issues
+
+When the live check detects a different upstream version, [report-stable-update.ps1](../scripts/report-stable-update.ps1) creates an issue titled `osu!stable <version>: integration review required`. It shows the recorded and detected build, three checks to complete, and links to the changelog, workflow run and profile. The linked profile contains the executable fingerprint and other baseline data.
+
+An invisible marker identifies each upstream version. Before posting, the script checks all pages of open and closed issues. An existing issue prevents duplicates and further comments, even after closure. Workflow concurrency serializes scheduled and manual runs to prevent competing creations.
+
+The check still fails while versions differ, including after opening or finding an issue. Fetch failures, invalid feed/profile data and an unverified baseline don't create version-review issues. Saved changelog fixtures are also blocked from publishing. GitHub API errors fail the workflow without retrying the issue write automatically.
+
+To preview an issue locally, create a report with `check-stable.ps1 -ChangelogPath <saved-response.json> -ReportPath <report.json>`, then run `report-stable-update.ps1 -ReportPath <report.json> -Repository osu-chatter/osu-chatter -DryRun`. Add `-OutputPath <preview.md>` to save its Markdown. Preview mode makes no GitHub requests; the checker still reports a version mismatch as an error after writing its report.
 
 Run `./scripts/check-stable.ps1` for the live metadata check or `./scripts/test-stable-monitor.ps1` for its offline fixtures. `-ChangelogPath <saved-response.json>` supports offline diagnosis and explicitly identifies fixture input. After validating an actual client build, update the official identifier and fingerprint/evidence together; do not weaken integration checks to accommodate an unknown layout.
 
